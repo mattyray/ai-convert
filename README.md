@@ -47,3 +47,31 @@ This app is built primarily for:
 
 ## 🧱 Project Structure
 
+---
+
+## 🚧 Development Phases
+
+1. **Project restructure** (from MatthewRaynor.com)
+2. **Frontend scaffold** with Tailwind + Vite
+3. **API endpoints** for generation, auth, Stripe
+4. **MVP flow**: upload → result → unlock
+5. **Monetization experiments**
+6. **Optional GPU migration if traffic warrants**
+
+---
+
+## ⚖️ Disclaimers
+
+This is a career research project. Images are generated for entertainment only. No personal data is stored without consent. This app complies with fair use, privacy, and ethical AI guidelines.
+
+---
+
+## 📫 Author
+
+**Matthew Raynor**  
+Self-taught full-stack web developer, AI explorer, and accessibility advocate.  
+🔗 [matthewraynor.com](https://matthewraynor.com)  
+📬 [mnraynor90@gmail.com](mailto:mnraynor90@gmail.com)
+
+---
+

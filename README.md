@@ -1,62 +1,49 @@
-# MatthewRaynor.com
+# 🧠 ai-convert – Viral AI Image Generator (Career & Research Project)
 
-![CI](https://github.com/mattyray/matthew_raynor_website/actions/workflows/ci.yml/badge.svg)
+**ai-convert** is a research-driven, full-stack web application that allows users to upload photos and receive an AI-generated, stylized image transformation. The project is designed as a technical and creative experiment in building viral, monetized, AI-powered web experiences using modern technologies.
 
-A personal full-stack web platform for Matthew Raynor — a quadriplegic self-taught developer, artist, and motivational creator — featuring a blog, portfolio, online store, press hub, and AI chatbot.
+---
 
-## 🧠 Project Purpose
+## 🔍 Purpose
 
-This website showcases:
-- Inspirational blog posts and Substack content
-- A portfolio of Django and React projects
-- An online store for artwork and Matthew's book
-- Press/media features
-- A motivational AI-powered chatbot
-- Accessible UX for users with disabilities
+This app is built primarily for:
 
-## ⚙️ Tech Stack
+- 🎯 **Career development** – demonstrating advanced skills in React, Django, Stripe, OpenAI, and deployment
+- 🧪 **Research** – exploring user behavior, virality, and sustainable AI monetization
+- ⚖️ **Sustainability** – controlling cost while scaling, testing monetization strategies through ads, logins, and micro-payments
 
-**Backend**: Django 5.1.6, PostgreSQL, Docker, Gunicorn  
-**Frontend**: Bootstrap 5, SCSS, ScrollReveal  
-**Features**: Google SSO, Stripe Checkout, Cloudinary image hosting, Whitenoise, reCAPTCHA  
-**Deployment**: Heroku with Docker  
-**CI/CD**: GitHub Actions
+---
 
-## 🚀 Installation (Dev)
+## 🛠️ Stack
 
-```bash
-# Clone the repo
-git clone https://github.com/mattyray/matthew_raynor_website.git
-cd matthew_raynor_website
+| Layer       | Technology                                  |
+|------------|----------------------------------------------|
+| Frontend    | React, TypeScript, Vite, Tailwind CSS        |
+| Backend     | Django, Django REST Framework                |
+| Auth        | Google SSO, Facebook SSO                     |
+| Payments    | Stripe Checkout                              |
+| AI Engine   | OpenAI (initial), Replicate/RunPod + SDXL (optional) |
+| Hosting     | Netlify (frontend), Heroku/Fly.io (backend)  |
+| Storage     | Cloudinary or S3 for image uploads           |
+| Ads         | AdSense / Adsterra (rewarded unlock model)   |
+| Analytics   | Google Analytics + custom usage logs         |
 
-# Copy and edit .env file
-cp .env.example .env  # (You’ll need to manually add real keys)
+---
 
-# Run Docker
-docker-compose up --build
+## 💡 Core Features
 
-App will be available at http://localhost:8001
+- ✅ Photo upload (1–3 images)
+- ✅ AI-generated image (OpenAI or SDXL)
+- ✅ Social media shareable results (with watermark)
+- ✅ Unlock options:
+  - Watch ad
+  - Login with SSO
+  - Pay via Stripe
+- ✅ Public result pages with Open Graph previews
+- ✅ Strict privacy, rate limiting, and budget controls
+- ✅ Optional: email newsletter integration and referral tracking
 
-# Enter web container
-docker-compose exec web bash
+---
 
-# Run migrations
-python manage.py migrate
+## 🧱 Project Structure
 
-# Create superuser
-python manage.py createsuperuser
-
-# Collect static files
-python manage.py collectstatic --noinput
-
-docker-compose exec web python manage.py test
-
-#deploy
-
-heroku container:login
-heroku container:push web --app matthew-raynor-site
-heroku container:release web --app matthew-raynor-site
-
-Created by Matthew Raynor
-GitHub: @mattyray
-Email: mnraynor90@gmail.com

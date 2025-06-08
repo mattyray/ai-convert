@@ -1,23 +1,21 @@
 from environ import Env
 from pathlib import Path
-import os
 import stripe
-print("💥 settings.py loaded from latest build")
+import os
 
+print("💥 settings.py loaded from latest build")
 
 # Initialize environment variables
 env = Env()
 Env.read_env()
 
-# Stripe keys
+# Stripe
 STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY', default='pk_test_dummy')
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY', default='sk_test_dummy')
 STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET', default='whsec_dummy')
-
 stripe.api_key = STRIPE_SECRET_KEY
 
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
-
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,15 +25,9 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="No Secret Key Found")
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-# Allowed hosts
+# Hosts
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[
-    "localhost",
-    "127.0.0.1",
-    "0.0.0.0",
-    "web",
-    "matthew-raynor-site-3d5f17c6a796.herokuapp.com",
-    "matthewraynor.com",
-    "www.matthewraynor.com",
+    "localhost", "127.0.0.1", "0.0.0.0", "web"
 ])
 
 # Installed apps
@@ -51,27 +43,14 @@ INSTALLED_APPS = [
 
     # Custom apps
     'accounts.apps.AccountsConfig',
-    'pages.apps.PagesConfig',
-    'store.apps.StoreConfig',
-    'blog.apps.BlogConfig',
-    'portfolio.apps.PortfolioConfig',
     'chat.apps.ChatConfig',
 
     # Third-party
     'django.contrib.sites',
-    'crispy_forms',
-    'crispy_bootstrap5',
-    'import_export',
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
     'allauth.socialaccount.providers.google',
-    'embed_video',
-    'django_recaptcha',
-    'django_extensions',
-    'ckeditor',
-    'ckeditor_uploader',
-
 ]
 
 # Middleware
@@ -87,7 +66,6 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# URL config
 ROOT_URLCONF = 'django_project.urls'
 
 # Templates
@@ -114,14 +92,14 @@ DATABASES = {
     "default": env.db_url("DATABASE_URL")
 }
 
-# Authentication
+# Auth
 AUTH_USER_MODEL = 'accounts.CustomUser'
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-# Allauth settings
+# Allauth
 SITE_ID = env.int("DJANGO_SITE_ID", default=1)
 ACCOUNT_AUTHENTICATION_METHOD = 'email'
 ACCOUNT_USERNAME_REQUIRED = False
@@ -132,7 +110,6 @@ ACCOUNT_SIGNUP_REDIRECT_URL = '/dashboard/'
 LOGIN_REDIRECT_URL = '/accounts/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 
-# Google SSO credentials from .env
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
         'SCOPE': ['profile', 'email'],
@@ -145,7 +122,6 @@ SOCIALACCOUNT_PROVIDERS = {
         }
     }
 }
-
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -161,13 +137,13 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static files
+# Static
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR.parent / "static"]
 STATIC_ROOT = BASE_DIR.parent / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-# Media (Cloudinary)
+# Media
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 # Staticfiles finders
@@ -175,16 +151,6 @@ STATICFILES_FINDERS = [
     'django.contrib.staticfiles.finders.FileSystemFinder',
     'django.contrib.staticfiles.finders.AppDirectoriesFinder',
 ]
-
-# Crispy Forms
-CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
-CRISPY_TEMPLATE_PACK = "bootstrap5"
-
-# reCAPTCHA
-SILENCED_SYSTEM_CHECKS = ['django_recaptcha.recaptcha_test_key_error']
-RECAPTCHA_PUBLIC_KEY = env("RECAPTCHA_PUBLIC_KEY", default="test")
-RECAPTCHA_PRIVATE_KEY = env("RECAPTCHA_PRIVATE_KEY", default="test")
-
 
 # Email
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.locmem.EmailBackend")
@@ -195,8 +161,7 @@ EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="test@test.com")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="testpassword")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@test.com")
 
-
-# Production security
+# Security
 if not DEBUG:
     SECURE_SSL_REDIRECT = env.bool("DJANGO_SECURE_SSL_REDIRECT", default=True)
     SECURE_HSTS_SECONDS = env.int("DJANGO_SECURE_HSTS_SECONDS", default=2592000)
@@ -212,23 +177,5 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
 
-# Import-export
-IMPORT_EXPORT_USE_TRANSACTIONS = True
-
-# Auto field
+# Other
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-
-CKEDITOR_UPLOAD_PATH = "uploads/"
-CKEDITOR_IMAGE_BACKEND = "pillow"
-
-CKEDITOR_CONFIGS = {
-    'default': {
-        'toolbar': 'Full',
-        'height': 300,
-        'width': 'auto',
-        'extraPlugins': ','.join([
-            'uploadimage', 'image2', 'embed', 'autoembed', 'codesnippet',
-        ]),
-    }
-}

@@ -45,3 +45,6 @@ pandas-stubs==2.2.3.250308
 python-dateutil==2.9.0.post0
 tablib==3.8.0
 openpyxl==3.1.5
+
+PyJWT==2.10.1
+

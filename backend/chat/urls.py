@@ -1,10 +1,8 @@
 from django.urls import path
-from .views import ChatInterfaceView, ChatAPIView
-from django.views.decorators.csrf import csrf_exempt
+from .views import ChatAPIView
 
 app_name = "chat"
 
 urlpatterns = [
-    path("", ChatInterfaceView.as_view(), name="interface"),
-    path("api/", csrf_exempt(ChatAPIView.as_view()), name="api"),  # ✅ FIXED HERE
+    path("ask/", ChatAPIView.as_view(), name="ask"),
 ]

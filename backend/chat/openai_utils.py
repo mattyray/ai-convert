@@ -1,32 +1,28 @@
+from pathlib import Path
 import json
-import os
 from django.conf import settings
 from openai import OpenAI
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
 
 def load_knowledge_base():
     """
     Loads all JSON files from chat/data/ into a combined list.
     Each file should contain either a list or a single dict.
     """
-    base_path = os.path.join(settings.BASE_DIR, "chat", "data")
+    base_path = Path(settings.BASE_DIR) / "chat" / "data"
     knowledge = []
 
-    for filename in os.listdir(base_path):
-        if filename.endswith(".json"):
-            with open(os.path.join(base_path, filename), "r") as f:
-                try:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        knowledge.extend(data)
-                    elif isinstance(data, dict):
-                        knowledge.append(data)
-                except Exception as e:
-                    print(f"Error loading {filename}: {e}")
+    for file in base_path.glob("*.json"):
+        try:
+            data = json.load(file.open())
+            if isinstance(data, list):
+                knowledge.extend(data)
+            elif isinstance(data, dict):
+                knowledge.append(data)
+        except Exception as e:
+            print(f"Error loading {file.name}: {e}")
     return knowledge
-
 
 def get_openai_response(user_message):
     """

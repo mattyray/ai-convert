@@ -1,38 +1,36 @@
+version: "3.9"
+
 services:
   web:
     build: .
     command: python manage.py runserver 0.0.0.0:8000
     ports:
-      - "8002:8000"  # External port 8001 maps to internal port 8000
+      - "8002:8000"  # Exposes port 8000 inside container as 8002 on host
     depends_on:
       db:
-        condition: service_healthy  # Ensures DB is ready before Django starts
+        condition: service_healthy
     env_file:
-      - .env  # ✅ Loads your .env file into the container
-
+      - .env
     volumes:
-      - .:/code  # Mounts your code into the container
-      - ./django-chatwidget:/code/django-chatwidget  # ✅ Add this
-
+      - .:/code
     networks:
-      - art_moving_network
+      - ai_convert_network
 
   db:
-    image: postgres:15  # Latest stable version
-    container_name: matthew_raynor_db
+    image: postgres:16  # ✅ Optionally upgraded from 15
+    container_name: ai_convert_db
     restart: always
     volumes:
       - postgres_data:/var/lib/postgresql/data/
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       retries: 5
     networks:
-      - art_moving_network
+      - ai_convert_network
 
 volumes:
   postgres_data:
 
 networks:
-  art_moving_network:
+  ai_convert_network:

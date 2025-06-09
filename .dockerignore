@@ -1,3 +1,32 @@
 .venv
 .git
 .gitignore
+# Ignore Python cache and virtualenv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+*.log
+
+# Ignore local envs and secrets
+.env
+.env.*
+
+# Ignore OS & editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Ignore node and frontend stuff (if not used in Docker context)
+node_modules/
+frontend/
+*.lock
+*.map
+
+# Ignore compiled output
+staticfiles/
+media/
+build/
+dist/

@@ -1,35 +1,26 @@
-from django.views.decorators.csrf import csrf_exempt
-from django.views.generic import TemplateView
-from openai import OpenAI
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 from django.conf import settings
-from django.views import View
-from django.http import JsonResponse
-import json
-from .utils import load_combined_context  # 👈 add this import
-
+from openai import OpenAI
+from .openai_utils import get_openai_response
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
-class ChatAPIView(View):
-    def post(self, request):
+class ChatAPIView(APIView):
+    """
+    POST /api/chat/ask/
+    Accepts a user message and returns an AI-generated reply using OpenAI.
+    """
+
+    def post(self, request, *args, **kwargs):
+        message = request.data.get("message", "")
+        if not message:
+            return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            data = json.loads(request.body)
-            message = data.get("message", "")
-            full_context = load_combined_context()  # 👈 now uses both blog + KB
-
-            chat_response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": full_context},
-                    {"role": "user", "content": message}
-                ]
-            )
-            reply = chat_response.choices[0].message.content.strip()
-            return JsonResponse({"reply": reply})
+            reply = get_openai_response(message)
+            return Response({"reply": reply}, status=status.HTTP_200_OK)
         except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
-
-
-class ChatInterfaceView(TemplateView):
-    template_name = "chat/chat_interface.html"
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,11 +1,9 @@
-version: "3.9"
-
 services:
   web:
     build: .
     command: python manage.py runserver 0.0.0.0:8000
     ports:
-      - "8002:8000"  # Exposes port 8000 inside container as 8002 on host
+      - "8002:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -17,9 +15,13 @@ services:
       - ai_convert_network
 
   db:
-    image: postgres:16  # ✅ Optionally upgraded from 15
+    image: postgres:16
     container_name: ai_convert_db
     restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     healthcheck:

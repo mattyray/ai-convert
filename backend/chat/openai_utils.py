@@ -1,5 +1,3 @@
-
-#chat/openai_utils.py
 import json
 import os
 from django.conf import settings
@@ -7,8 +5,12 @@ from openai import OpenAI
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-# Load all knowledge base files in chat/data
+
 def load_knowledge_base():
+    """
+    Loads all JSON files from chat/data/ into a combined list.
+    Each file should contain either a list or a single dict.
+    """
     base_path = os.path.join(settings.BASE_DIR, "chat", "data")
     knowledge = []
 
@@ -25,13 +27,19 @@ def load_knowledge_base():
                     print(f"Error loading {filename}: {e}")
     return knowledge
 
-# Build system prompt with injected knowledge base
+
 def get_openai_response(user_message):
+    """
+    Constructs a system prompt using the loaded knowledge base
+    and sends a user message to OpenAI.
+    """
     context_blocks = load_knowledge_base()
     system_content = "You are a helpful assistant on MatthewRaynor.com. Use the following context when answering questions:\n\n"
 
     for block in context_blocks:
-        system_content += f"- {block.get('title', '')}: {block.get('content', '')}\n"
+        title = block.get('title') or 'Untitled'
+        content = block.get('content') or ''
+        system_content += f"- {title}: {content}\n"
 
     response = client.chat.completions.create(
         model="gpt-4",

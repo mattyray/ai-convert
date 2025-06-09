@@ -29,6 +29,8 @@ certifi==2025.4.26
 idna==3.10
 charset-normalizer==3.4.2
 
+djangorestframework==3.16.0
+
 # Type + utility
 pydantic>=2.6,<2.10
 typing_extensions==4.13.0

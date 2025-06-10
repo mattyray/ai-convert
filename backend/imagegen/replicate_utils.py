@@ -14,7 +14,7 @@ def generate_image_from_prompt(prompt):
     }
 
     data = {
-        "version": "db21e45e5b0e5cc1c6e3ee1b3e2d592e25528884f056ecb2d6c04d6df4c3f4c3",  # SDXL v1.0
+        "version": "db21e45a0968b68a30f86cd1df30878e61d33c6b5519595c13bafd1b5c48c6b1",  # ✅ Valid SDXL v1.0
         "input": {
             "prompt": prompt
         }
@@ -25,5 +25,4 @@ def generate_image_from_prompt(prompt):
     if response.status_code != 201:
         return {"error": f"Failed to create prediction: {response.json()}"}
 
-    prediction = response.json()
-    return prediction
+    return response.json()

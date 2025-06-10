@@ -14,19 +14,25 @@ def generate_image_from_prompt(prompt):
     }
 
     data = {
-        "version": "ad59ca21177f9e217b9075e7300cf6e14f7e5b4505b87b9689dbd866e9768969",  # OpenJourney v4
+        "version": "YOUR_MODEL_VERSION_HERE",  # Replace with free model ID
         "input": {
-            "prompt": prompt,
-            "width": 512,
-            "height": 512,
-            "num_outputs": 1
+            "prompt": prompt
         }
     }
 
     response = requests.post(url, headers=headers, json=data)
-
     if response.status_code != 201:
         return {"error": f"Failed to create prediction: {response.json()}"}
 
-    prediction = response.json()
-    return prediction
+    return response.json()
+
+
+def get_prediction_status(prediction_id):
+    url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
+    headers = {
+        "Authorization": f"Token {REPLICATE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.get(url, headers=headers)
+    return response.json()

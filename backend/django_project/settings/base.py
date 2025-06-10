@@ -52,6 +52,9 @@ INSTALLED_APPS = [
     'allauth.socialaccount',
     'allauth.socialaccount.providers.google',
 
+    'imagegen',
+
+
     'rest_framework',
     'rest_framework.authtoken', 
 ]

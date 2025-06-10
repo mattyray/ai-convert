@@ -14,15 +14,14 @@ def generate_image_from_prompt(prompt):
     }
 
     data = {
-        "version": "a9758cbf4e64239de7dbe7e1c3cfb6f25ad9a5825ebf27357c1f0c480ab0a261",  # ✅ Public SDXL v1.0
+        # ✅ Use the public 'Latest' SDXL version ID
+        "version": "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
         "input": {
             "prompt": prompt
         }
     }
 
     response = requests.post(url, headers=headers, json=data)
-
     if response.status_code != 201:
         return {"error": f"Failed to create prediction: {response.json()}"}
-
     return response.json()

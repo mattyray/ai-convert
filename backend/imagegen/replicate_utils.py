@@ -3,7 +3,7 @@ import os
 import time
 
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
-MODEL_VERSION = "bytedance/sdxl-lightning-4step:latest"
+MODEL_VERSION = "6f7a773af6fc3e8de9d5a3c00be77c17308914bf67772726aff83496ba1e3bbe"
 
 HEADERS = {
     "Authorization": f"Token {REPLICATE_API_TOKEN}",

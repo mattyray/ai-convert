@@ -14,14 +14,19 @@ def generate_image_from_prompt(prompt):
     }
 
     data = {
-        # ✅ Use the public 'Latest' SDXL version ID
-        "version": "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
+        "version": "ad59ca21177f9e217b9075e7300cf6e14f7e5b4505b87b9689dbd866e9768969",  # OpenJourney v4
         "input": {
-            "prompt": prompt
+            "prompt": prompt,
+            "width": 512,
+            "height": 512,
+            "num_outputs": 1
         }
     }
 
     response = requests.post(url, headers=headers, json=data)
+
     if response.status_code != 201:
         return {"error": f"Failed to create prediction: {response.json()}"}
-    return response.json()
+
+    prediction = response.json()
+    return prediction

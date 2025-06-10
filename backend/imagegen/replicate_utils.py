@@ -14,7 +14,7 @@ def generate_image_from_prompt(prompt):
     }
 
     data = {
-        "version": "YOUR_MODEL_VERSION_HERE",  # Replace with free model ID
+        "version": "e67e7f63c8a4160992fce841a55bde2d9ce5d6c799aa5f076eb23ba2275d56db",
         "input": {
             "prompt": prompt
         }

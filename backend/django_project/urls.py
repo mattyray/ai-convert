@@ -12,6 +12,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/accounts/", include(("accounts.urls", "accounts"), namespace="accounts")),
     path("api/chat/", include(("chat.urls", "chat"), namespace="chat")),
+    path("api/image/", include("imagegen.urls")),
+
 ]
 
 if settings.DEBUG:

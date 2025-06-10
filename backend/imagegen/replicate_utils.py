@@ -14,7 +14,7 @@ def generate_image_from_prompt(prompt):
     }
 
     data = {
-        "version": "db21e45a0968b68a30f86cd1df30878e61d33c6b5519595c13bafd1b5c48c6b1",  # ✅ Valid SDXL v1.0
+        "version": "a9758cbf4e64239de7dbe7e1c3cfb6f25ad9a5825ebf27357c1f0c480ab0a261",  # ✅ Public SDXL v1.0
         "input": {
             "prompt": prompt
         }

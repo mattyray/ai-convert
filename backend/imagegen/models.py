@@ -12,7 +12,8 @@ class GeneratedImage(models.Model):
     prompt = models.TextField()
     match_name = models.CharField(max_length=100)
     selfie = models.ImageField(upload_to="uploads/selfies/")
-    output_url = models.URLField()
+    output_image = models.ImageField(upload_to="uploads/fused/", null=True, blank=True)  # ✅ NEW FIELD
+    output_url = models.URLField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -17,13 +17,13 @@ class GenerateImageView(APIView):
         if not selfie:
             return Response({"error": "Selfie is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Enforce usage limit if anonymous
-        if not request.user.is_authenticated:
-            count = request.session.get("image_generation_count", 0)
-            if count >= 1:
-                return Response({
-                    "error": "You’ve used your free generation. Please log in or watch an ad to unlock more."
-                }, status=status.HTTP_403_FORBIDDEN)
+        # Enforce usage limit if anonymous (disabled for testing)
+        # if not request.user.is_authenticated:
+        #     count = request.session.get("image_generation_count", 0)
+        #     if count >= 1:
+        #         return Response({
+        #             "error": "You’ve used your free generation. Please log in or watch an ad to unlock more."
+        #         }, status=status.HTTP_403_FORBIDDEN)
 
         # Save selfie temporarily for face matching
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
@@ -50,8 +50,9 @@ class GenerateImageView(APIView):
         result = generate_image_from_prompt(prompt)
         request.session[f"pending_image_{result['prediction_id']}"] = temp_image.id
 
-        if not request.user.is_authenticated:
-            request.session["image_generation_count"] = count + 1
+        # Disabled for testing
+        # if not request.user.is_authenticated:
+        #     request.session["image_generation_count"] = count + 1
 
         return Response({
             **result,
@@ -75,6 +76,7 @@ class ImageStatusView(APIView):
                     pass
 
         return Response(result)
+
 
 class UnlockImageView(APIView):
     def post(self, request):

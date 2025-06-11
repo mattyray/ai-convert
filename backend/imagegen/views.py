@@ -8,7 +8,6 @@ import tempfile
 import base64
 from django.core.files.base import ContentFile
 
-# 🔗 Example Napoleon portrait (public domain)
 NAPOLEON_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Jacques-Louis_David_-_The_Emperor_Napoleon_in_His_Study_at_the_Tuileries_-_Google_Art_Project.jpg/512px-Jacques-Louis_David_-_The_Emperor_Napoleon_in_His_Study_at_the_Tuileries_-_Google_Art_Project.jpg"
 
 class GenerateImageView(APIView):
@@ -30,7 +29,6 @@ class GenerateImageView(APIView):
 
         match_name = match_result["match_name"]
 
-        # Save the selfie and create DB entry
         temp_image = GeneratedImage.objects.create(
             user=request.user if request.user.is_authenticated else None,
             prompt=f"You as {match_name}",
@@ -46,16 +44,14 @@ class GenerateImageView(APIView):
             temp_image.delete()
             return Response(result, status=status.HTTP_502_BAD_GATEWAY)
 
-        # Save output as image file
         img_data = base64.b64decode(result["base64"].split(",", 1)[-1])
-        temp_image.output_url = ""  # You could upload to Cloudinary if needed
+        temp_image.output_image.save(f"{temp_image.id}_fused.jpg", ContentFile(img_data))
         temp_image.save()
-        temp_image.selfie.save(f"{temp_image.id}_output.jpg", ContentFile(img_data))
 
         return Response({
             "match_name": match_name,
             "message": "Face fusion completed successfully.",
-            "image_base64": result["base64"]
+            "output_image_url": temp_image.output_image.url
         })
 
 

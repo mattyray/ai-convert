@@ -1,31 +1,24 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
-from .replicate_utils import generate_image_from_prompt, get_prediction_status
+from .hf_utils import facefusion_via_hf
 from .models import GeneratedImage
-from .serializers import GeneratedImageSerializer
 from .face_match import match_face
 import tempfile
+import base64
+from django.core.files.base import ContentFile
+
+# 🔗 Example Napoleon portrait (public domain)
+NAPOLEON_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Jacques-Louis_David_-_The_Emperor_Napoleon_in_His_Study_at_the_Tuileries_-_Google_Art_Project.jpg/512px-Jacques-Louis_David_-_The_Emperor_Napoleon_in_His_Study_at_the_Tuileries_-_Google_Art_Project.jpg"
 
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        prompt_base = request.data.get("prompt", "A cinematic 4K portrait of")
         selfie = request.FILES.get("selfie")
-
         if not selfie:
-            return Response({"error": "Selfie is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Selfie is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Enforce usage limit if anonymous (disabled for testing)
-        # if not request.user.is_authenticated:
-        #     count = request.session.get("image_generation_count", 0)
-        #     if count >= 1:
-        #         return Response({
-        #             "error": "You’ve used your free generation. Please log in or watch an ad to unlock more."
-        #         }, status=status.HTTP_403_FORBIDDEN)
-
-        # Save selfie temporarily for face matching
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
             for chunk in selfie.chunks():
                 tmp.write(chunk)
@@ -36,46 +29,39 @@ class GenerateImageView(APIView):
             return Response(match_result, status=status.HTTP_400_BAD_REQUEST)
 
         match_name = match_result["match_name"]
-        prompt = f"{prompt_base} {match_name}, highly detailed, beautiful lighting"
 
-        # Save permanent selfie and entry
+        # Save the selfie and create DB entry
         temp_image = GeneratedImage.objects.create(
             user=request.user if request.user.is_authenticated else None,
-            prompt=prompt,
+            prompt=f"You as {match_name}",
             match_name=match_name,
             selfie=selfie,
             output_url="",
         )
 
-        result = generate_image_from_prompt(prompt)
-        request.session[f"pending_image_{result['prediction_id']}"] = temp_image.id
+        selfie_url = temp_image.selfie.url
+        result = facefusion_via_hf(selfie_url, NAPOLEON_IMAGE_URL)
 
-        # Disabled for testing
-        # if not request.user.is_authenticated:
-        #     request.session["image_generation_count"] = count + 1
+        if "error" in result:
+            temp_image.delete()
+            return Response(result, status=status.HTTP_502_BAD_GATEWAY)
+
+        # Save output as image file
+        img_data = base64.b64decode(result["base64"].split(",", 1)[-1])
+        temp_image.output_url = ""  # You could upload to Cloudinary if needed
+        temp_image.save()
+        temp_image.selfie.save(f"{temp_image.id}_output.jpg", ContentFile(img_data))
 
         return Response({
-            **result,
-            "match_name": match_name
+            "match_name": match_name,
+            "message": "Face fusion completed successfully.",
+            "image_base64": result["base64"]
         })
 
 
 class ImageStatusView(APIView):
     def get(self, request, prediction_id):
-        result = get_prediction_status(prediction_id)
-
-        if result.get("output"):
-            gen_id = request.session.get(f"pending_image_{prediction_id}")
-            if gen_id:
-                try:
-                    image = GeneratedImage.objects.get(id=gen_id)
-                    image.output_url = result["output"][0]  # assuming first image
-                    image.save()
-                    del request.session[f"pending_image_{prediction_id}"]
-                except GeneratedImage.DoesNotExist:
-                    pass
-
-        return Response(result)
+        return Response({"error": "Not supported for Hugging Face flow"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UnlockImageView(APIView):

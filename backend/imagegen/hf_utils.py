@@ -1,6 +1,6 @@
 import requests
 
-HF_API_URL = "https://leonelhs-facefusion.hf.space/run/predict"
+HF_API_URL = "https://mnraynor90-facefusion3-1.hf.space/run/predict"
 
 def facefusion_via_hf(selfie_url, target_url):
     try:
@@ -14,7 +14,7 @@ def facefusion_via_hf(selfie_url, target_url):
         data = response.json()
         if "data" in data and data["data"]:
             return {"base64": data["data"][0]}
-        return {"error": "Unexpected Hugging Face response."}
+        return {"error": "Unexpected Hugging Face response format."}
 
     except Exception as e:
         return {"error": f"FaceFusion API error: {e}"}

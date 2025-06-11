@@ -75,3 +75,8 @@ class ImageStatusView(APIView):
                     pass
 
         return Response(result)
+
+class UnlockImageView(APIView):
+    def post(self, request):
+        request.session["image_generation_count"] = 0
+        return Response({"message": "Unlock granted. You can generate again."})

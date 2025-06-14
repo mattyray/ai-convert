@@ -72,6 +72,10 @@ class FaceFusionClient:
                 print(f"Image result type: {type(result_image)}")
                 print(f"Image result content: {result_image}")
                 
+                # Check for None result
+                if result_image is None:
+                    raise Exception("Gradio returned None for the image result. This usually means the face swap failed on the server.")
+                
                 # Handle both string path and dict formats
                 if isinstance(result_image, str):
                     # It should now be a local file path due to download_files=True

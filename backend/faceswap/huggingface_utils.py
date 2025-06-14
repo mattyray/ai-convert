@@ -7,6 +7,7 @@ import tempfile
 import os
 import base64
 from gradio_client import Client
+import json
 
 # Your specific Hugging Face Space URL
 HUGGINGFACE_SPACE_URL = getattr(settings, 'HUGGINGFACE_FACESWAP_URL', 
@@ -54,7 +55,9 @@ class FaceFusionClient:
                 api_name="/process_images"  # Use the correct endpoint name
             )
             
-            print(f"Gradio result: {result}")
+            print(f"RAW Gradio result: {result}")
+            print(f"Result type: {type(result)}")
+            print(f"Result length: {len(result) if hasattr(result, '__len__') else 'No length'}")
             
             # Result is tuple of 2 elements: [image_dict, status_message]
             if result and len(result) >= 2:
@@ -62,73 +65,84 @@ class FaceFusionClient:
                 status_message = result[1]     # Status message
                 
                 print(f"Status message: {status_message}")
-                print(f"Image dict: {result_image_dict}")
+                print(f"Image dict type: {type(result_image_dict)}")
+                print(f"Image dict content: {result_image_dict}")
                 
-                if result_image_dict and isinstance(result_image_dict, dict):
-                    # The image dict has: path, url, size, orig_name, mime_type, is_stream, meta
-                    image_url = result_image_dict.get('url')
-                    image_path = result_image_dict.get('path')
-                    
-                    if image_url:
-                        # Download from URL
-                        print(f"Downloading result from URL: {image_url}")
-                        img_response = requests.get(image_url)
-                        if img_response.status_code == 200:
-                            return img_response.content
-                        else:
-                            raise Exception(f"Failed to download result image from URL: {img_response.status_code}")
-                    
-                    elif image_path and os.path.exists(image_path):
-                        # Read from local path
-                        print(f"Reading result from path: {image_path}")
-                        with open(image_path, 'rb') as f:
-                            return f.read()
-                    
-                    else:
-                        raise Exception(f"No valid image URL or path in result: {result_image_dict}")
-                
-                else:
-                    raise Exception(f"No image result. Status: {status_message}")
-            
-            else:
-                raise Exception(f"Unexpected result format: {result}")
-                    
-        except Exception as e:
-            # If the main endpoint fails, try the fallback /predict endpoint
-            try:
-                print(f"Main endpoint failed: {e}")
-                print("Trying fallback /predict endpoint...")
-                
-                client = Client("mnraynor90/facefusionfastapi")
-                result = client.predict(
-                    source_url=source_url,
-                    target_url=target_url,
-                    api_name="/predict"
-                )
-                
-                # Handle the same way
-                if result and len(result) >= 2:
-                    result_image_dict = result[0]
-                    status_message = result[1]
-                    
-                    if result_image_dict and isinstance(result_image_dict, dict):
+                # Let's debug what's actually in the image dict
+                if result_image_dict is not None:
+                    if isinstance(result_image_dict, dict):
+                        print(f"Image dict keys: {list(result_image_dict.keys())}")
+                        for key, value in result_image_dict.items():
+                            print(f"  {key}: {value} (type: {type(value)})")
+                        
+                        # Try all possible ways to get the image
                         image_url = result_image_dict.get('url')
                         image_path = result_image_dict.get('path')
                         
+                        print(f"Extracted URL: {image_url}")
+                        print(f"Extracted Path: {image_path}")
+                        
                         if image_url:
+                            print(f"Attempting to download from URL: {image_url}")
+                            # Handle both absolute and relative URLs
+                            if not image_url.startswith('http'):
+                                # It might be a relative URL, make it absolute
+                                image_url = f"{self.base_url}/file={image_url}"
+                                print(f"Modified URL: {image_url}")
+                            
                             img_response = requests.get(image_url)
+                            print(f"Download response status: {img_response.status_code}")
+                            print(f"Download response headers: {dict(img_response.headers)}")
+                            
                             if img_response.status_code == 200:
+                                print(f"Successfully downloaded {len(img_response.content)} bytes")
                                 return img_response.content
-                        elif image_path and os.path.exists(image_path):
-                            with open(image_path, 'rb') as f:
-                                return f.read()
+                            else:
+                                print(f"Failed to download. Response: {img_response.text[:200]}")
+                        
+                        elif image_path:
+                            print(f"Attempting to read from path: {image_path}")
+                            if os.path.exists(image_path):
+                                with open(image_path, 'rb') as f:
+                                    content = f.read()
+                                    print(f"Successfully read {len(content)} bytes from file")
+                                    return content
+                            else:
+                                print(f"Path does not exist: {image_path}")
+                        
+                        # If neither URL nor path worked, let's try to see if there's image data directly
+                        for key in ['data', 'content', 'image', 'result']:
+                            if key in result_image_dict:
+                                print(f"Found potential image data in key '{key}': {type(result_image_dict[key])}")
+                        
+                        raise Exception(f"No valid image URL or path found. Dict contents: {result_image_dict}")
                     
-                    raise Exception(f"Fallback also failed. Status: {status_message}")
+                    else:
+                        print(f"Image result is not a dict, it's: {type(result_image_dict)}")
+                        print(f"Image result value: {result_image_dict}")
+                        
+                        # Maybe it's a direct image path or URL?
+                        if isinstance(result_image_dict, str):
+                            if result_image_dict.startswith('http'):
+                                img_response = requests.get(result_image_dict)
+                                if img_response.status_code == 200:
+                                    return img_response.content
+                            elif os.path.exists(result_image_dict):
+                                with open(result_image_dict, 'rb') as f:
+                                    return f.read()
+                        
+                        raise Exception(f"Unexpected image result type: {type(result_image_dict)}, value: {result_image_dict}")
+                
                 else:
-                    raise Exception(f"Fallback result format unexpected: {result}")
+                    print("Image dict is None!")
+                    raise Exception(f"No image result (None). Status: {status_message}")
+            
+            else:
+                raise Exception(f"Unexpected result format - length: {len(result) if hasattr(result, '__len__') else 'No length'}, content: {result}")
                     
-            except Exception as fallback_error:
-                raise Exception(f"Both endpoints failed. Main: {str(e)}, Fallback: {str(fallback_error)}")
+        except Exception as e:
+            print(f"Exception occurred: {str(e)}")
+            raise Exception(f"Face swapping failed: {str(e)}")
 
 def process_face_swap(job_id):
     """

@@ -123,3 +123,81 @@ class FaceSwapTestURLView(APIView):
             return Response({
                 'error': f'Face swap failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+# Add this debug view to your faceswap/views.py
+
+class DebugGradioAPIView(APIView):
+    """
+    Debug endpoint to test Gradio Space connectivity
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            from .huggingface_utils import HUGGINGFACE_SPACE_URL
+            import requests
+            
+            results = {}
+            
+            # Test 1: Check if the space is running
+            try:
+                response = requests.get(HUGGINGFACE_SPACE_URL, timeout=10)
+                results['space_status'] = f"HTTP {response.status_code}"
+                results['space_accessible'] = response.status_code == 200
+            except Exception as e:
+                results['space_status'] = f"Error: {str(e)}"
+                results['space_accessible'] = False
+            
+            # Test 2: Try to get API info using gradio_client
+            try:
+                from gradio_client import Client
+                client = Client(HUGGINGFACE_SPACE_URL)
+                api_info = client.view_api(all_endpoints=True)
+                results['gradio_client_success'] = True
+                results['api_info'] = str(api_info)
+            except Exception as e:
+                results['gradio_client_success'] = False
+                results['gradio_client_error'] = str(e)
+            
+            # Test 3: Try common Gradio endpoints
+            endpoints_to_test = [
+                '/api/predict',
+                '/run/predict', 
+                '/predict',
+                '/api',
+                '/info',
+                '/app_info'
+            ]
+            
+            results['endpoint_tests'] = {}
+            for endpoint in endpoints_to_test:
+                try:
+                    url = f"{HUGGINGFACE_SPACE_URL}{endpoint}"
+                    response = requests.get(url, timeout=5)
+                    results['endpoint_tests'][endpoint] = {
+                        'status': response.status_code,
+                        'content_type': response.headers.get('content-type', 'unknown'),
+                        'content_preview': response.text[:200] if response.text else 'No content'
+                    }
+                except Exception as e:
+                    results['endpoint_tests'][endpoint] = {
+                        'error': str(e)
+                    }
+            
+            # Test 4: Check if it's a Gradio 4 or 5 app
+            try:
+                response = requests.get(f"{HUGGINGFACE_SPACE_URL}/info", timeout=5)
+                if response.status_code == 200:
+                    results['gradio_info'] = response.json()
+            except:
+                pass
+                
+            return Response({
+                'space_url': HUGGINGFACE_SPACE_URL,
+                'debug_results': results
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': f'Debug failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

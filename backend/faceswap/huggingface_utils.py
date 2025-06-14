@@ -24,18 +24,26 @@ class FaceFusionClient:
                 
                 # Check if it's already a full URL (like Cloudinary)
                 if image_url.startswith('http'):
+                    print(f"✅ Using full URL: {image_url}")
                     return image_url
                 
-                # If it's a relative URL, make it absolute
-                if image_url.startswith('/'):
-                    # For local development - you'd want your actual domain in production
-                    # But this won't work for Hugging Face Space access
-                    base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
-                    image_url = f"{base_url}{image_url}"
-                    
-                    # WARNING: This local URL won't be accessible from Hugging Face
-                    print(f"⚠️  WARNING: Using local URL that may not be accessible from Hugging Face: {image_url}")
-                    print("💡 TIP: Configure Cloudinary storage for public URLs")
+                # If it's a relative URL and we're using Cloudinary, force Cloudinary URL
+                if image_url.startswith('/') and hasattr(image_field, 'name'):
+                    # Try to get Cloudinary URL directly
+                    try:
+                        import cloudinary.utils
+                        cloudinary_url = cloudinary.utils.cloudinary_url(image_field.name)[0]
+                        print(f"✅ Generated Cloudinary URL: {cloudinary_url}")
+                        return cloudinary_url
+                    except Exception as cloudinary_error:
+                        print(f"⚠️  Cloudinary URL generation failed: {cloudinary_error}")
+                        
+                        # Fallback to local URL (but warn it won't work for HF)
+                        base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
+                        image_url = f"{base_url}{image_url}"
+                        print(f"⚠️  WARNING: Using local URL that may not be accessible from Hugging Face: {image_url}")
+                        print("💡 TIP: Check Cloudinary configuration")
+                        return image_url
                 
                 return image_url
             else:

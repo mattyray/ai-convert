@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from cloudinary_storage.storage import MediaCloudinaryStorage
 
 class GeneratedImage(models.Model):
     user = models.ForeignKey(
@@ -11,8 +12,16 @@ class GeneratedImage(models.Model):
     )
     prompt = models.TextField()
     match_name = models.CharField(max_length=100)
-    selfie = models.ImageField(upload_to="uploads/selfies/")
-    output_image = models.ImageField(upload_to="uploads/fused/", null=True, blank=True)  # ✅ NEW FIELD
+    selfie = models.ImageField(
+        upload_to="uploads/selfies/",
+        storage=MediaCloudinaryStorage()  # ✅ Explicitly use Cloudinary
+    )
+    output_image = models.ImageField(
+        upload_to="uploads/fused/", 
+        null=True, 
+        blank=True,
+        storage=MediaCloudinaryStorage()  # ✅ Explicitly use Cloudinary
+    )
     output_url = models.URLField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 

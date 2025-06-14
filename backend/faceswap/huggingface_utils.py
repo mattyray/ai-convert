@@ -44,15 +44,14 @@ class FaceFusionClient:
             print(f"Source URL: {source_url}")
             print(f"Target URL: {target_url}")
             
-            # Create a temporary directory for downloads
+            # Create a temporary directory for potential downloads
             download_dir = tempfile.mkdtemp()
-            print(f"Download directory: {download_dir}")
+            print(f"Temp directory created: {download_dir}")
             
             # Use the correct endpoint with download_files enabled
             client = Client(
                 "mnraynor90/facefusionfastapi",
-                download_files=True,  # Enable automatic file downloads
-                download_dir=download_dir  # Specify download directory
+                download_files=True  # Enable automatic file downloads
             )
             
             # Call the process_images function

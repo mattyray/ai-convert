@@ -16,59 +16,74 @@ class FaceFusionClient:
     def __init__(self):
         self.base_url = HUGGINGFACE_SPACE_URL
         
-    def upload_image_to_temp_url(self, image_path):
-        """Upload image to a temporary hosting service to get a URL"""
+    def get_image_url(self, image_field):
+        """Convert Django ImageField to accessible URL"""
         try:
-            # Use a simple image hosting service like imgbb or similar
-            # For now, we'll convert to base64 data URL
-            with open(image_path, 'rb') as f:
-                image_data = f.read()
-                encoded = base64.b64encode(image_data).decode('utf-8')
-                # Detect image format
-                if image_path.lower().endswith('.png'):
-                    data_url = f"data:image/png;base64,{encoded}"
-                else:
-                    data_url = f"data:image/jpeg;base64,{encoded}"
-                return data_url
+            if hasattr(image_field, 'url'):
+                image_url = image_field.url
+                # If it's a relative URL, make it absolute
+                if image_url.startswith('/'):
+                    # For local development - you'd want your actual domain in production
+                    base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
+                    image_url = f"{base_url}{image_url}"
+                return image_url
+            else:
+                raise Exception("Invalid image field")
         except Exception as e:
-            raise Exception(f"Failed to create data URL: {str(e)}")
+            raise Exception(f"Failed to get image URL: {str(e)}")
         
-    def swap_faces(self, source_image_path, target_image_path):
+    def swap_faces(self, source_image_field, target_image_field):
         """
         Call your Hugging Face Space Gradio API to perform face swapping
         """
         try:
+            # Get URLs for the images (works with Cloudinary or local URLs)
+            source_url = self.get_image_url(source_image_field)
+            target_url = self.get_image_url(target_image_field)
+            
+            print(f"Source URL: {source_url}")
+            print(f"Target URL: {target_url}")
+            
             # Method 1: Try using gradio_client
             try:
                 client = Client(self.base_url)
                 
-                # Your Gradio app expects URLs, so we need to convert files to URLs
-                source_url = self.upload_image_to_temp_url(source_image_path)
-                target_url = self.upload_image_to_temp_url(target_image_path)
-                
-                # Call the Gradio function (assuming it's the first/default function)
+                # Call the Gradio function with URLs
                 result = client.predict(
                     source_url,  # source_input
                     target_url,  # target_input
                     api_name="/predict"
                 )
                 
+                print(f"Gradio result: {result}")
+                
                 # Result should be [image, status_message]
                 if result and len(result) >= 2:
                     result_image = result[0]  # The image result
                     status_message = result[1]  # Status message
                     
+                    print(f"Status message: {status_message}")
+                    
                     if result_image:
-                        # Convert PIL Image to bytes
-                        from PIL import Image
-                        import io
-                        
+                        # Handle different result types
                         if isinstance(result_image, str):
-                            # If it's a file path, read it
-                            with open(result_image, 'rb') as f:
-                                return f.read()
+                            if result_image.startswith('http'):
+                                # It's a URL - download it
+                                img_response = requests.get(result_image)
+                                if img_response.status_code == 200:
+                                    return img_response.content
+                                else:
+                                    raise Exception(f"Failed to download result image: {img_response.status_code}")
+                            elif os.path.exists(result_image):
+                                # It's a local file path
+                                with open(result_image, 'rb') as f:
+                                    return f.read()
+                            else:
+                                raise Exception(f"Invalid result image path: {result_image}")
                         elif hasattr(result_image, 'save'):
                             # If it's a PIL Image
+                            from PIL import Image
+                            import io
                             img_buffer = io.BytesIO()
                             result_image.save(img_buffer, format='JPEG')
                             return img_buffer.getvalue()
@@ -83,10 +98,6 @@ class FaceFusionClient:
                 print(f"Gradio client failed: {gradio_error}")
                 
                 # Method 2: Try direct HTTP calls to Gradio API
-                source_url = self.upload_image_to_temp_url(source_image_path)
-                target_url = self.upload_image_to_temp_url(target_image_path)
-                
-                # Try the Gradio API endpoint
                 payload = {
                     "data": [source_url, target_url]
                 }
@@ -105,12 +116,19 @@ class FaceFusionClient:
                         result_image = result_data['data'][0]
                         
                         if isinstance(result_image, str):
-                            if result_image.startswith('data:image'):
+                            if result_image.startswith('http'):
+                                # Download the result
+                                file_response = requests.get(result_image)
+                                if file_response.status_code == 200:
+                                    return file_response.content
+                                else:
+                                    raise Exception(f"Failed to download result: {file_response.status_code}")
+                            elif result_image.startswith('data:image'):
                                 # Base64 data URL
                                 header, encoded = result_image.split(',', 1)
                                 return base64.b64decode(encoded)
                             else:
-                                # File path - try to download
+                                # Try as file path
                                 file_response = requests.get(f"{self.base_url}/file={result_image}")
                                 if file_response.status_code == 200:
                                     return file_response.content
@@ -142,35 +160,21 @@ def process_face_swap(job_id):
         job.status = 'processing'
         job.save()
         
-        # Create temporary files for processing
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as source_temp, \
-             tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as target_temp:
-            
-            # Copy uploaded images to temp files
-            source_temp.write(job.source_image.read())
-            target_temp.write(job.target_image.read())
-            source_temp.flush()
-            target_temp.flush()
-            
-            # Initialize FaceFusion client
-            client = FaceFusionClient()
-            
-            # Perform face swap
-            result_image_data = client.swap_faces(source_temp.name, target_temp.name)
-            
-            # Save result image
-            result_filename = f"faceswap_result_{job.id}_{int(time.time())}.jpg"
-            result_file = ContentFile(result_image_data, name=result_filename)
-            job.result_image.save(result_filename, result_file)
-            
-            # Update job status
-            job.status = 'completed'
-            job.completed_at = timezone.now()
-            job.save()
-            
-        # Clean up temp files
-        os.unlink(source_temp.name)
-        os.unlink(target_temp.name)
+        # Initialize FaceFusion client
+        client = FaceFusionClient()
+        
+        # Perform face swap using the ImageField objects directly
+        result_image_data = client.swap_faces(job.source_image, job.target_image)
+        
+        # Save result image
+        result_filename = f"faceswap_result_{job.id}_{int(time.time())}.jpg"
+        result_file = ContentFile(result_image_data, name=result_filename)
+        job.result_image.save(result_filename, result_file)
+        
+        # Update job status
+        job.status = 'completed'
+        job.completed_at = timezone.now()
+        job.save()
         
         return True
         

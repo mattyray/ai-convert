@@ -5,10 +5,11 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 import tempfile
 import os
+import base64
 
-# Your Hugging Face Space URL (replace with your actual space)
+# Your specific Hugging Face Space URL
 HUGGINGFACE_SPACE_URL = getattr(settings, 'HUGGINGFACE_FACESWAP_URL', 
-                               'https://your-username-facefusion.hf.space')
+                               'https://mnraynor90-facefusionfastapi.hf.space')
 
 class FaceFusionClient:
     def __init__(self):
@@ -16,42 +17,60 @@ class FaceFusionClient:
         
     def swap_faces(self, source_image_path, target_image_path):
         """
-        Call your Hugging Face Space API to perform face swapping
+        Call your Hugging Face Space Gradio API to perform face swapping
         """
         try:
-            # Prepare files for upload
-            with open(source_image_path, 'rb') as source_file, \
-                 open(target_image_path, 'rb') as target_file:
+            # Read and encode images as base64
+            with open(source_image_path, 'rb') as source_file:
+                source_data = source_file.read()
+                source_b64 = base64.b64encode(source_data).decode('utf-8')
+                source_url = f"data:image/jpeg;base64,{source_b64}"
+            
+            with open(target_image_path, 'rb') as target_file:
+                target_data = target_file.read()
+                target_b64 = base64.b64encode(target_data).decode('utf-8')
+                target_url = f"data:image/jpeg;base64,{target_b64}"
+            
+            # Prepare payload for Gradio API
+            payload = {
+                "data": [source_url, target_url]
+            }
+            
+            # Call Gradio API endpoint
+            response = requests.post(
+                f"{self.base_url}/run/predict",
+                json=payload,
+                timeout=300  # 5 minutes timeout
+            )
+            
+            if response.status_code == 200:
+                result_data = response.json()
                 
-                files = {
-                    'source_image': source_file,
-                    'target_image': target_file
-                }
-                
-                # Call your Gradio API endpoint
-                response = requests.post(
-                    f"{self.base_url}/api/predict",
-                    files=files,
-                    timeout=300  # 5 minutes timeout
-                )
-                
-                if response.status_code == 200:
-                    result_data = response.json()
+                # Gradio returns data in 'data' field
+                if 'data' in result_data and result_data['data']:
+                    # The first item should be the result image (base64 encoded)
+                    result_image_data = result_data['data'][0]
                     
-                    # Gradio typically returns file paths in the response
-                    if 'data' in result_data and result_data['data']:
-                        result_image_url = result_data['data'][0]
-                        
-                        # Download the result image
-                        image_response = requests.get(f"{self.base_url}/file={result_image_url}")
-                        if image_response.status_code == 200:
-                            return image_response.content
+                    # Handle different response formats
+                    if isinstance(result_image_data, str):
+                        if result_image_data.startswith('data:image'):
+                            # Remove data URL prefix and decode base64
+                            header, encoded = result_image_data.split(',', 1)
+                            image_bytes = base64.b64decode(encoded)
+                            return image_bytes
                         else:
-                            raise Exception(f"Failed to download result image: {image_response.status_code}")
+                            # Might be a file path - try to fetch it
+                            file_response = requests.get(f"{self.base_url}/file={result_image_data}")
+                            if file_response.status_code == 200:
+                                return file_response.content
+                            else:
+                                raise Exception(f"Failed to download result file: {file_response.status_code}")
                     else:
-                        raise Exception("No result image in API response")
+                        raise Exception(f"Unexpected result format: {type(result_image_data)}")
                 else:
-                    raise Exception(f"API call failed: {response.status_code} - {response.text}")
+                    raise Exception(f"No result image in API response: {result_data}")
+            else:
+                raise Exception(f"API call failed: {response.status_code} - {response.text}")
                     
         except requests.exceptions.Timeout:
             raise Exception("Request timed out - face swapping took too long")

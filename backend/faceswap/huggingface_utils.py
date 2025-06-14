@@ -69,25 +69,45 @@ class FaceFusionClient:
                     # It's a file path - download it from Gradio
                     print(f"Image path: {result_image}")
                     
-                    # Gradio file paths need to be accessed via the /file= endpoint
-                    if result_image.startswith('/tmp/gradio/'):
-                        # Extract just the file identifier part
-                        file_id = result_image.split('/tmp/gradio/')[-1]
-                        download_url = f"{self.base_url}/file=/tmp/gradio/{file_id}"
-                    else:
-                        download_url = f"{self.base_url}/file={result_image}"
+                    # Try multiple URL formats for Gradio file access
+                    possible_urls = [
+                        # Standard Gradio file endpoint
+                        f"{self.base_url}/file{result_image}",
+                        # Alternative format without =
+                        f"{self.base_url}/file/{result_image.lstrip('/')}",
+                        # With gradio prefix
+                        f"{self.base_url}/gradio_api/file{result_image}",
+                        # Direct file access
+                        f"{self.base_url}{result_image}",
+                    ]
                     
-                    print(f"Downloading from: {download_url}")
+                    # Try each URL format
+                    for download_url in possible_urls:
+                        print(f"Trying download from: {download_url}")
+                        
+                        try:
+                            img_response = requests.get(download_url, timeout=30)
+                            print(f"Response status: {img_response.status_code}")
+                            
+                            if img_response.status_code == 200:
+                                content_length = len(img_response.content)
+                                print(f"Successfully downloaded {content_length} bytes")
+                                
+                                # Verify it's actually image data
+                                if content_length > 1000:  # Should be at least 1KB for a real image
+                                    return img_response.content
+                                else:
+                                    print(f"Content too small ({content_length} bytes), trying next URL")
+                                    continue
+                            else:
+                                print(f"Failed with status {img_response.status_code}: {img_response.text[:100]}")
+                                
+                        except Exception as url_error:
+                            print(f"Error with URL {download_url}: {str(url_error)}")
+                            continue
                     
-                    img_response = requests.get(download_url)
-                    print(f"Download response status: {img_response.status_code}")
-                    
-                    if img_response.status_code == 200:
-                        print(f"Successfully downloaded {len(img_response.content)} bytes")
-                        return img_response.content
-                    else:
-                        print(f"Download failed. Response: {img_response.text[:200]}")
-                        raise Exception(f"Failed to download result image: {img_response.status_code}")
+                    # If all URLs failed, raise an error
+                    raise Exception(f"Could not download image from any URL. Last path: {result_image}")
                 
                 elif isinstance(result_image, dict):
                     # It's a dict with url/path - handle as before
@@ -103,12 +123,22 @@ class FaceFusionClient:
                             raise Exception(f"Failed to download from URL: {img_response.status_code}")
                     
                     elif image_path:
-                        download_url = f"{self.base_url}/file={image_path}"
-                        img_response = requests.get(download_url)
-                        if img_response.status_code == 200:
-                            return img_response.content
-                        else:
-                            raise Exception(f"Failed to download from path: {img_response.status_code}")
+                        # Try the same multiple URL approach for dict paths
+                        possible_urls = [
+                            f"{self.base_url}/file{image_path}",
+                            f"{self.base_url}/file/{image_path.lstrip('/')}",
+                            f"{self.base_url}/gradio_api/file{image_path}",
+                        ]
+                        
+                        for download_url in possible_urls:
+                            try:
+                                img_response = requests.get(download_url)
+                                if img_response.status_code == 200:
+                                    return img_response.content
+                            except:
+                                continue
+                        
+                        raise Exception(f"Failed to download from path: {image_path}")
                     
                     else:
                         raise Exception(f"No valid URL or path in image dict: {result_image}")

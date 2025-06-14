@@ -44,109 +44,91 @@ class FaceFusionClient:
             print(f"Source URL: {source_url}")
             print(f"Target URL: {target_url}")
             
-            # Method 1: Try using gradio_client
-            try:
-                client = Client(self.base_url)
+            # Use the correct endpoint from your Space documentation
+            client = Client("mnraynor90/facefusionfastapi")
+            
+            # Call the process_images function - this is the main one that works
+            result = client.predict(
+                source_url=source_url,
+                target_url=target_url,
+                api_name="/process_images"  # Use the correct endpoint name
+            )
+            
+            print(f"Gradio result: {result}")
+            
+            # Result is tuple of 2 elements: [image_dict, status_message]
+            if result and len(result) >= 2:
+                result_image_dict = result[0]  # Image dict with path, url, etc.
+                status_message = result[1]     # Status message
                 
-                # Call the Gradio function with URLs
+                print(f"Status message: {status_message}")
+                print(f"Image dict: {result_image_dict}")
+                
+                if result_image_dict and isinstance(result_image_dict, dict):
+                    # The image dict has: path, url, size, orig_name, mime_type, is_stream, meta
+                    image_url = result_image_dict.get('url')
+                    image_path = result_image_dict.get('path')
+                    
+                    if image_url:
+                        # Download from URL
+                        print(f"Downloading result from URL: {image_url}")
+                        img_response = requests.get(image_url)
+                        if img_response.status_code == 200:
+                            return img_response.content
+                        else:
+                            raise Exception(f"Failed to download result image from URL: {img_response.status_code}")
+                    
+                    elif image_path and os.path.exists(image_path):
+                        # Read from local path
+                        print(f"Reading result from path: {image_path}")
+                        with open(image_path, 'rb') as f:
+                            return f.read()
+                    
+                    else:
+                        raise Exception(f"No valid image URL or path in result: {result_image_dict}")
+                
+                else:
+                    raise Exception(f"No image result. Status: {status_message}")
+            
+            else:
+                raise Exception(f"Unexpected result format: {result}")
+                    
+        except Exception as e:
+            # If the main endpoint fails, try the fallback /predict endpoint
+            try:
+                print(f"Main endpoint failed: {e}")
+                print("Trying fallback /predict endpoint...")
+                
+                client = Client("mnraynor90/facefusionfastapi")
                 result = client.predict(
-                    source_url,  # source_input
-                    target_url,  # target_input
+                    source_url=source_url,
+                    target_url=target_url,
                     api_name="/predict"
                 )
                 
-                print(f"Gradio result: {result}")
-                
-                # Result should be [image, status_message]
+                # Handle the same way
                 if result and len(result) >= 2:
-                    result_image = result[0]  # The image result
-                    status_message = result[1]  # Status message
+                    result_image_dict = result[0]
+                    status_message = result[1]
                     
-                    print(f"Status message: {status_message}")
-                    
-                    if result_image:
-                        # Handle different result types
-                        if isinstance(result_image, str):
-                            if result_image.startswith('http'):
-                                # It's a URL - download it
-                                img_response = requests.get(result_image)
-                                if img_response.status_code == 200:
-                                    return img_response.content
-                                else:
-                                    raise Exception(f"Failed to download result image: {img_response.status_code}")
-                            elif os.path.exists(result_image):
-                                # It's a local file path
-                                with open(result_image, 'rb') as f:
-                                    return f.read()
-                            else:
-                                raise Exception(f"Invalid result image path: {result_image}")
-                        elif hasattr(result_image, 'save'):
-                            # If it's a PIL Image
-                            from PIL import Image
-                            import io
-                            img_buffer = io.BytesIO()
-                            result_image.save(img_buffer, format='JPEG')
-                            return img_buffer.getvalue()
-                        else:
-                            raise Exception(f"Unexpected image result type: {type(result_image)}")
-                    else:
-                        raise Exception(f"No image result. Status: {status_message}")
-                else:
-                    raise Exception(f"Unexpected result format: {result}")
-                    
-            except Exception as gradio_error:
-                print(f"Gradio client failed: {gradio_error}")
-                
-                # Method 2: Try direct HTTP calls to Gradio API
-                payload = {
-                    "data": [source_url, target_url]
-                }
-                
-                response = requests.post(
-                    f"{self.base_url}/run/predict",
-                    json=payload,
-                    timeout=300
-                )
-                
-                if response.status_code == 200:
-                    result_data = response.json()
-                    
-                    if 'data' in result_data and result_data['data']:
-                        # First element should be the image
-                        result_image = result_data['data'][0]
+                    if result_image_dict and isinstance(result_image_dict, dict):
+                        image_url = result_image_dict.get('url')
+                        image_path = result_image_dict.get('path')
                         
-                        if isinstance(result_image, str):
-                            if result_image.startswith('http'):
-                                # Download the result
-                                file_response = requests.get(result_image)
-                                if file_response.status_code == 200:
-                                    return file_response.content
-                                else:
-                                    raise Exception(f"Failed to download result: {file_response.status_code}")
-                            elif result_image.startswith('data:image'):
-                                # Base64 data URL
-                                header, encoded = result_image.split(',', 1)
-                                return base64.b64decode(encoded)
-                            else:
-                                # Try as file path
-                                file_response = requests.get(f"{self.base_url}/file={result_image}")
-                                if file_response.status_code == 200:
-                                    return file_response.content
-                                else:
-                                    raise Exception(f"Failed to download result: {file_response.status_code}")
-                        else:
-                            raise Exception(f"Unexpected result format: {type(result_image)}")
-                    else:
-                        raise Exception(f"No data in API response: {result_data}")
-                else:
-                    raise Exception(f"HTTP request failed: {response.status_code} - {response.text}")
+                        if image_url:
+                            img_response = requests.get(image_url)
+                            if img_response.status_code == 200:
+                                return img_response.content
+                        elif image_path and os.path.exists(image_path):
+                            with open(image_path, 'rb') as f:
+                                return f.read()
                     
-        except requests.exceptions.Timeout:
-            raise Exception("Request timed out - face swapping took too long")
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"Network error: {str(e)}")
-        except Exception as e:
-            raise Exception(f"Face swapping failed: {str(e)}")
+                    raise Exception(f"Fallback also failed. Status: {status_message}")
+                else:
+                    raise Exception(f"Fallback result format unexpected: {result}")
+                    
+            except Exception as fallback_error:
+                raise Exception(f"Both endpoints failed. Main: {str(e)}, Fallback: {str(fallback_error)}")
 
 def process_face_swap(job_id):
     """

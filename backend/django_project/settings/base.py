@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     # Custom apps
     'accounts.apps.AccountsConfig',
     'chat.apps.ChatConfig',
+    'faceswap.apps.FaceswapConfig',  # Add this line
 
     # Third-party
     'django.contrib.sites',
@@ -57,6 +58,8 @@ INSTALLED_APPS = [
 
     'rest_framework',
     'rest_framework.authtoken', 
+
+
 ]
 
 # Middleware
@@ -193,3 +196,6 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ]
 }
+
+HUGGINGFACE_FACESWAP_URL = env('HUGGINGFACE_FACESWAP_URL', 
+    default='https://your-username-facefusion.hf.space')

@@ -9,14 +9,26 @@ import base64
 from django.core.files.base import ContentFile
 import os
 
-# Map historical figures to their image URLs
+# Map historical figures to their Cloudinary URLs
 HISTORICAL_FIGURES = {
-    "Napoleon": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Jacques-Louis_David_-_The_Emperor_Napoleon_in_His_Study_at_the_Tuileries_-_Google_Art_Project.jpg/512px-Jacques-Louis_David_-_The_Emperor_Napoleon_in_His_Study_at_the_Tuileries_-_Google_Art_Project.jpg",
-    "Albert Einstein": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Einstein_1921_by_F_Schmutzer_-_restoration.jpg/512px-Einstein_1921_by_F_Schmutzer_-_restoration.jpg",
-    "Cleopatra": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Kleopatra-VII.-Altes-Museum-Berlin1.jpg/512px-Kleopatra-VII.-Altes-Museum-Berlin1.jpg",
-    "Leonardo da Vinci": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/ba/Leonardo_self.jpg/512px-Leonardo_self.jpg",
-    "Joan of Arc": "https://res.cloudinary.com/dddye9wli/image/upload/v1749857225/elvisnotsinging_twnnta.png",
-    # Add more historical figures as needed
+    "Princess Diana": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/princess_diana_ueb9ha.png",
+    "Marilyn Monroe": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/marilyn_monroe_geys6v.png",
+    "Pocahontas": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/Pocahontas_kp0obo.png",
+    "Napoleon": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/napolean_ukozvo.png",
+    "Marie Antoinette": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921363/Marie_Antoinette_fvjtgy.png",
+    "Keith Haring": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/keith_k7b5xw.png",
+    "Malcolm X": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/malcolm_x_a8sluo.png",
+    "Jimi Hendrix": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/jimi_hendrix_u07bvu.png",
+    "Joan of Arc": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/Joan_of_Arc_vvi28l.png",
+    "Leonardo da Vinci": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/leonardo_davinci_lv7gy8.png",
+    "Cleopatra": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921359/cleopatra_zcslcx.png",
+    "Frida Kahlo": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/frida_khalo_wq6qyl.png",
+    "JFK": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/jfk_rznzq0.png",
+    "James Dean": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/james_dean_wvmc5c.png",
+    "Coco Chanel": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/Coco_Chanel_mnx6s9.png",
+    "Elvis Presley": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png",
+    "Che Guevara": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921355/Che_Guevara_n8nmln.png",
+    "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921354/alexander_the_great_mcdwpy.png",
 }
 
 class GenerateImageView(APIView):

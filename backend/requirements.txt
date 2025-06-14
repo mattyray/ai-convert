@@ -53,3 +53,4 @@ dlib==20.0.0
 cmake==4.0.2
 
 
+gradio-client==1.10.3

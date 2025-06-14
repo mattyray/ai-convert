@@ -17,31 +17,54 @@ class FaceFusionClient:
         
     def swap_faces(self, source_image_path, target_image_path):
         """
-        Call your Hugging Face Space Gradio API to perform face swapping
+        Call your Hugging Face Space FastAPI to perform face swapping
         """
         try:
-            # Read and encode images as base64
-            with open(source_image_path, 'rb') as source_file:
-                source_data = source_file.read()
-                source_b64 = base64.b64encode(source_data).decode('utf-8')
-                source_url = f"data:image/jpeg;base64,{source_b64}"
+            # Prepare files for upload to FastAPI
+            with open(source_image_path, 'rb') as source_file, \
+                 open(target_image_path, 'rb') as target_file:
+                
+                files = {
+                    'source_image': ('source.jpg', source_file, 'image/jpeg'),
+                    'target_image': ('target.jpg', target_file, 'image/jpeg')
+                }
+                
+                # Try multiple possible FastAPI endpoints
+                endpoints_to_try = [
+                    "/swap_faces",
+                    "/faceswap", 
+                    "/predict",
+                    "/api/swap_faces",
+                    "/api/faceswap"
+                ]
+                
+                for endpoint in endpoints_to_try:
+                    try:
+                        response = requests.post(
+                            f"{self.base_url}{endpoint}",
+                            files=files,
+                            timeout=300  # 5 minutes timeout
+                        )
+                        
+                        if response.status_code == 200:
+                            # Success! Process the response
+                            break
+                        elif response.status_code == 404:
+                            # Try next endpoint
+                            continue
+                        else:
+                            raise Exception(f"API call failed: {response.status_code} - {response.text}")
+                    except requests.exceptions.RequestException as e:
+                        if endpoint == endpoints_to_try[-1]:  # Last endpoint failed
+                            raise e
+                        continue
+                else:
+                    # All endpoints failed
+                    raise Exception(f"All API endpoints failed. Tried: {endpoints_to_try}")
             
-            with open(target_image_path, 'rb') as target_file:
-                target_data = target_file.read()
-                target_b64 = base64.b64encode(target_data).decode('utf-8')
-                target_url = f"data:image/jpeg;base64,{target_b64}"
-            
-            # Prepare payload for Gradio API
-            payload = {
-                "data": [source_url, target_url]
-            }
-            
-            # Call Gradio API endpoint
-            response = requests.post(
-                f"{self.base_url}/run/predict",
-                json=payload,
-                timeout=300  # 5 minutes timeout
-            )
+            # Reset file pointers for response processing
+            source_file.seek(0)
+            target_file.seek(0)
             
             if response.status_code == 200:
                 result_data = response.json()

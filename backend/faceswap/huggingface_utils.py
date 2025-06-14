@@ -6,6 +6,7 @@ from django.core.files.storage import default_storage
 import tempfile
 import os
 import base64
+from gradio_client import Client
 
 # Your specific Hugging Face Space URL
 HUGGINGFACE_SPACE_URL = getattr(settings, 'HUGGINGFACE_FACESWAP_URL', 
@@ -15,85 +16,112 @@ class FaceFusionClient:
     def __init__(self):
         self.base_url = HUGGINGFACE_SPACE_URL
         
+    def upload_image_to_temp_url(self, image_path):
+        """Upload image to a temporary hosting service to get a URL"""
+        try:
+            # Use a simple image hosting service like imgbb or similar
+            # For now, we'll convert to base64 data URL
+            with open(image_path, 'rb') as f:
+                image_data = f.read()
+                encoded = base64.b64encode(image_data).decode('utf-8')
+                # Detect image format
+                if image_path.lower().endswith('.png'):
+                    data_url = f"data:image/png;base64,{encoded}"
+                else:
+                    data_url = f"data:image/jpeg;base64,{encoded}"
+                return data_url
+        except Exception as e:
+            raise Exception(f"Failed to create data URL: {str(e)}")
+        
     def swap_faces(self, source_image_path, target_image_path):
         """
-        Call your Hugging Face Space FastAPI to perform face swapping
+        Call your Hugging Face Space Gradio API to perform face swapping
         """
         try:
-            # Prepare files for upload to FastAPI
-            with open(source_image_path, 'rb') as source_file, \
-                 open(target_image_path, 'rb') as target_file:
+            # Method 1: Try using gradio_client
+            try:
+                client = Client(self.base_url)
                 
-                files = {
-                    'source_image': ('source.jpg', source_file, 'image/jpeg'),
-                    'target_image': ('target.jpg', target_file, 'image/jpeg')
+                # Your Gradio app expects URLs, so we need to convert files to URLs
+                source_url = self.upload_image_to_temp_url(source_image_path)
+                target_url = self.upload_image_to_temp_url(target_image_path)
+                
+                # Call the Gradio function (assuming it's the first/default function)
+                result = client.predict(
+                    source_url,  # source_input
+                    target_url,  # target_input
+                    api_name="/predict"
+                )
+                
+                # Result should be [image, status_message]
+                if result and len(result) >= 2:
+                    result_image = result[0]  # The image result
+                    status_message = result[1]  # Status message
+                    
+                    if result_image:
+                        # Convert PIL Image to bytes
+                        from PIL import Image
+                        import io
+                        
+                        if isinstance(result_image, str):
+                            # If it's a file path, read it
+                            with open(result_image, 'rb') as f:
+                                return f.read()
+                        elif hasattr(result_image, 'save'):
+                            # If it's a PIL Image
+                            img_buffer = io.BytesIO()
+                            result_image.save(img_buffer, format='JPEG')
+                            return img_buffer.getvalue()
+                        else:
+                            raise Exception(f"Unexpected image result type: {type(result_image)}")
+                    else:
+                        raise Exception(f"No image result. Status: {status_message}")
+                else:
+                    raise Exception(f"Unexpected result format: {result}")
+                    
+            except Exception as gradio_error:
+                print(f"Gradio client failed: {gradio_error}")
+                
+                # Method 2: Try direct HTTP calls to Gradio API
+                source_url = self.upload_image_to_temp_url(source_image_path)
+                target_url = self.upload_image_to_temp_url(target_image_path)
+                
+                # Try the Gradio API endpoint
+                payload = {
+                    "data": [source_url, target_url]
                 }
                 
-                # Try multiple possible FastAPI endpoints
-                endpoints_to_try = [
-                    "/swap_faces",
-                    "/faceswap", 
-                    "/predict",
-                    "/api/swap_faces",
-                    "/api/faceswap"
-                ]
+                response = requests.post(
+                    f"{self.base_url}/run/predict",
+                    json=payload,
+                    timeout=300
+                )
                 
-                for endpoint in endpoints_to_try:
-                    try:
-                        response = requests.post(
-                            f"{self.base_url}{endpoint}",
-                            files=files,
-                            timeout=300  # 5 minutes timeout
-                        )
-                        
-                        if response.status_code == 200:
-                            # Success! Process the response
-                            break
-                        elif response.status_code == 404:
-                            # Try next endpoint
-                            continue
-                        else:
-                            raise Exception(f"API call failed: {response.status_code} - {response.text}")
-                    except requests.exceptions.RequestException as e:
-                        if endpoint == endpoints_to_try[-1]:  # Last endpoint failed
-                            raise e
-                        continue
-                else:
-                    # All endpoints failed
-                    raise Exception(f"All API endpoints failed. Tried: {endpoints_to_try}")
-            
-            # Reset file pointers for response processing
-            source_file.seek(0)
-            target_file.seek(0)
-            
-            if response.status_code == 200:
-                result_data = response.json()
-                
-                # Gradio returns data in 'data' field
-                if 'data' in result_data and result_data['data']:
-                    # The first item should be the result image (base64 encoded)
-                    result_image_data = result_data['data'][0]
+                if response.status_code == 200:
+                    result_data = response.json()
                     
-                    # Handle different response formats
-                    if isinstance(result_image_data, str):
-                        if result_image_data.startswith('data:image'):
-                            # Remove data URL prefix and decode base64
-                            header, encoded = result_image_data.split(',', 1)
-                            image_bytes = base64.b64decode(encoded)
-                            return image_bytes
-                        else:
-                            # Might be a file path - try to fetch it
-                            file_response = requests.get(f"{self.base_url}/file={result_image_data}")
-                            if file_response.status_code == 200:
-                                return file_response.content
+                    if 'data' in result_data and result_data['data']:
+                        # First element should be the image
+                        result_image = result_data['data'][0]
+                        
+                        if isinstance(result_image, str):
+                            if result_image.startswith('data:image'):
+                                # Base64 data URL
+                                header, encoded = result_image.split(',', 1)
+                                return base64.b64decode(encoded)
                             else:
-                                raise Exception(f"Failed to download result file: {file_response.status_code}")
+                                # File path - try to download
+                                file_response = requests.get(f"{self.base_url}/file={result_image}")
+                                if file_response.status_code == 200:
+                                    return file_response.content
+                                else:
+                                    raise Exception(f"Failed to download result: {file_response.status_code}")
+                        else:
+                            raise Exception(f"Unexpected result format: {type(result_image)}")
                     else:
-                        raise Exception(f"Unexpected result format: {type(result_image_data)}")
+                        raise Exception(f"No data in API response: {result_data}")
                 else:
-                    raise Exception(f"No result image in API response: {result_data}")
-            else:
-                raise Exception(f"API call failed: {response.status_code} - {response.text}")
+                    raise Exception(f"HTTP request failed: {response.status_code} - {response.text}")
                     
         except requests.exceptions.Timeout:
             raise Exception("Request timed out - face swapping took too long")

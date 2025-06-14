@@ -198,4 +198,4 @@ REST_FRAMEWORK = {
 }
 
 HUGGINGFACE_FACESWAP_URL = env('HUGGINGFACE_FACESWAP_URL', 
-    default='https://your-username-facefusion.hf.space')
+    default='https://huggingface.co/spaces/mnraynor90/facefusionfastapi')

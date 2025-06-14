@@ -21,11 +21,22 @@ class FaceFusionClient:
         try:
             if hasattr(image_field, 'url'):
                 image_url = image_field.url
+                
+                # Check if it's already a full URL (like Cloudinary)
+                if image_url.startswith('http'):
+                    return image_url
+                
                 # If it's a relative URL, make it absolute
                 if image_url.startswith('/'):
                     # For local development - you'd want your actual domain in production
+                    # But this won't work for Hugging Face Space access
                     base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
                     image_url = f"{base_url}{image_url}"
+                    
+                    # WARNING: This local URL won't be accessible from Hugging Face
+                    print(f"⚠️  WARNING: Using local URL that may not be accessible from Hugging Face: {image_url}")
+                    print("💡 TIP: Configure Cloudinary storage for public URLs")
+                
                 return image_url
             else:
                 raise Exception("Invalid image field")

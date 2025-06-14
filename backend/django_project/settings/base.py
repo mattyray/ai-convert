@@ -4,10 +4,51 @@ import stripe
 import os
 
 print("💥 settings.py loaded from latest build")
+# Add this section to your settings.py after the imports but before the installed apps
+
+
+# Cloudinary Configuration
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
 # Initialize environment variables
 env = Env()
 Env.read_env()
+
+# Use CLOUDINARY_URL if available (Heroku style), otherwise use individual vars
+cloudinary_url = env('CLOUDINARY_URL', default='')
+if cloudinary_url:
+    # Parse the cloudinary://api_key:api_secret@cloud_name format
+    import re
+    match = re.match(r'cloudinary://(\d+):([^@]+)@(.+)', cloudinary_url)
+    if match:
+        api_key, api_secret, cloud_name = match.groups()
+        CLOUDINARY_STORAGE = {
+            'CLOUD_NAME': cloud_name,
+            'API_KEY': api_key,
+            'API_SECRET': api_secret,
+        }
+        print(f"✅ Cloudinary configured from CLOUDINARY_URL for cloud: {cloud_name}")
+    else:
+        raise ValueError("Invalid CLOUDINARY_URL format")
+else:
+    # Fallback to individual environment variables
+    CLOUDINARY_STORAGE = {
+        'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME', default='dddye9wli'),
+        'API_KEY': env('CLOUDINARY_API_KEY', default=''),
+        'API_SECRET': env('CLOUDINARY_API_SECRET', default=''),
+    }
+    print("⚠️  Using individual Cloudinary env vars")
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_STORAGE['CLOUD_NAME'],
+    api_key=CLOUDINARY_STORAGE['API_KEY'],
+    api_secret=CLOUDINARY_STORAGE['API_SECRET'],
+    secure=True
+)
+
+
 
 # Stripe
 STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY', default='pk_test_dummy')

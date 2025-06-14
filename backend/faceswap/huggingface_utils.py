@@ -44,8 +44,16 @@ class FaceFusionClient:
             print(f"Source URL: {source_url}")
             print(f"Target URL: {target_url}")
             
-            # Use the correct endpoint from your Space documentation
-            client = Client("mnraynor90/facefusionfastapi")
+            # Create a temporary directory for downloads
+            download_dir = tempfile.mkdtemp()
+            print(f"Download directory: {download_dir}")
+            
+            # Use the correct endpoint with download_files enabled
+            client = Client(
+                "mnraynor90/facefusionfastapi",
+                download_files=True,  # Enable automatic file downloads
+                download_dir=download_dir  # Specify download directory
+            )
             
             # Call the process_images function
             result = client.predict(
@@ -63,85 +71,68 @@ class FaceFusionClient:
                 
                 print(f"Status message: {status_message}")
                 print(f"Image result type: {type(result_image)}")
+                print(f"Image result content: {result_image}")
                 
                 # Handle both string path and dict formats
                 if isinstance(result_image, str):
-                    # It's a file path - download it from Gradio
-                    print(f"Image path: {result_image}")
+                    # It should now be a local file path due to download_files=True
+                    print(f"Local image path: {result_image}")
                     
-                    # Try multiple URL formats for Gradio file access
-                    possible_urls = [
-                        # Standard Gradio file endpoint
-                        f"{self.base_url}/file{result_image}",
-                        # Alternative format without =
-                        f"{self.base_url}/file/{result_image.lstrip('/')}",
-                        # With gradio prefix
-                        f"{self.base_url}/gradio_api/file{result_image}",
-                        # Direct file access
-                        f"{self.base_url}{result_image}",
-                    ]
-                    
-                    # Try each URL format
-                    for download_url in possible_urls:
-                        print(f"Trying download from: {download_url}")
-                        
-                        try:
-                            img_response = requests.get(download_url, timeout=30)
-                            print(f"Response status: {img_response.status_code}")
+                    if os.path.exists(result_image):
+                        print(f"File exists! Size: {os.path.getsize(result_image)} bytes")
+                        with open(result_image, 'rb') as f:
+                            image_data = f.read()
+                            print(f"Successfully read {len(image_data)} bytes from local file")
                             
-                            if img_response.status_code == 200:
-                                content_length = len(img_response.content)
-                                print(f"Successfully downloaded {content_length} bytes")
-                                
-                                # Verify it's actually image data
-                                if content_length > 1000:  # Should be at least 1KB for a real image
-                                    return img_response.content
-                                else:
-                                    print(f"Content too small ({content_length} bytes), trying next URL")
-                                    continue
-                            else:
-                                print(f"Failed with status {img_response.status_code}: {img_response.text[:100]}")
-                                
-                        except Exception as url_error:
-                            print(f"Error with URL {download_url}: {str(url_error)}")
-                            continue
-                    
-                    # If all URLs failed, raise an error
-                    raise Exception(f"Could not download image from any URL. Last path: {result_image}")
+                            # Clean up the download directory
+                            try:
+                                import shutil
+                                shutil.rmtree(download_dir)
+                                print(f"Cleaned up download directory: {download_dir}")
+                            except Exception as cleanup_error:
+                                print(f"Failed to cleanup download dir: {cleanup_error}")
+                            
+                            return image_data
+                    else:
+                        # File doesn't exist locally, maybe it's still a remote path
+                        print(f"Local file doesn't exist, trying remote download fallback")
+                        raise Exception(f"Local file not found and remote download failed: {result_image}")
                 
                 elif isinstance(result_image, dict):
-                    # It's a dict with url/path - handle as before
+                    # It's a dict with url/path - check if it has a local path first
+                    local_path = result_image.get('path')
                     image_url = result_image.get('url')
-                    image_path = result_image.get('path')
                     
-                    if image_url:
-                        print(f"Downloading from URL: {image_url}")
+                    print(f"Dict result - path: {local_path}, url: {image_url}")
+                    
+                    if local_path and os.path.exists(local_path):
+                        with open(local_path, 'rb') as f:
+                            image_data = f.read()
+                            # Clean up
+                            try:
+                                import shutil
+                                shutil.rmtree(download_dir)
+                            except:
+                                pass
+                            return image_data
+                    
+                    elif image_url:
+                        # Try downloading from URL as fallback
+                        print(f"Downloading from URL fallback: {image_url}")
                         img_response = requests.get(image_url)
                         if img_response.status_code == 200:
+                            # Clean up
+                            try:
+                                import shutil
+                                shutil.rmtree(download_dir)
+                            except:
+                                pass
                             return img_response.content
                         else:
                             raise Exception(f"Failed to download from URL: {img_response.status_code}")
                     
-                    elif image_path:
-                        # Try the same multiple URL approach for dict paths
-                        possible_urls = [
-                            f"{self.base_url}/file{image_path}",
-                            f"{self.base_url}/file/{image_path.lstrip('/')}",
-                            f"{self.base_url}/gradio_api/file{image_path}",
-                        ]
-                        
-                        for download_url in possible_urls:
-                            try:
-                                img_response = requests.get(download_url)
-                                if img_response.status_code == 200:
-                                    return img_response.content
-                            except:
-                                continue
-                        
-                        raise Exception(f"Failed to download from path: {image_path}")
-                    
                     else:
-                        raise Exception(f"No valid URL or path in image dict: {result_image}")
+                        raise Exception(f"No valid path or URL in image dict: {result_image}")
                 
                 else:
                     raise Exception(f"Unexpected image result type: {type(result_image)}")
@@ -151,6 +142,13 @@ class FaceFusionClient:
                     
         except Exception as e:
             print(f"Face swap error: {str(e)}")
+            # Clean up download directory on error
+            try:
+                if 'download_dir' in locals():
+                    import shutil
+                    shutil.rmtree(download_dir)
+            except:
+                pass
             raise Exception(f"Face swapping failed: {str(e)}")
 
 def process_face_swap(job_id):

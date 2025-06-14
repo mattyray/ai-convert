@@ -8,6 +8,8 @@ import tempfile
 import base64
 from django.core.files.base import ContentFile
 import os
+from django.core.files.uploadedfile import InMemoryUploadedFile
+import io
 
 # Map historical figures to their Cloudinary URLs
 HISTORICAL_FIGURES = {
@@ -39,11 +41,23 @@ class GenerateImageView(APIView):
         if not selfie:
             return Response({"error": "Selfie is required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Read the file content once and store it
+        selfie_content = selfie.read()
+        
         # Save uploaded selfie to temporary file for face matching
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            for chunk in selfie.chunks():
-                tmp.write(chunk)
+            tmp.write(selfie_content)
             tmp_path = tmp.name
+
+        # Create a new file object for Django model (reset file pointer)
+        selfie_for_model = InMemoryUploadedFile(
+            file=io.BytesIO(selfie_content),
+            field_name=selfie.field_name,
+            name=selfie.name,
+            content_type=selfie.content_type,
+            size=len(selfie_content),
+            charset=selfie.charset,
+        )
 
         try:
             # Step 1: Match face with historical figures
@@ -63,12 +77,12 @@ class GenerateImageView(APIView):
                     "error": f"No historical image available for {match_name}. Available figures: {list(HISTORICAL_FIGURES.keys())}"
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Step 2: Create database record
+            # Step 2: Create database record with the fresh file object
             temp_image = GeneratedImage.objects.create(
                 user=request.user if request.user.is_authenticated else None,
                 prompt=f"You as {match_name}",
                 match_name=match_name,
-                selfie=selfie,
+                selfie=selfie_for_model,  # Use the fresh file object
                 output_url="",
             )
 

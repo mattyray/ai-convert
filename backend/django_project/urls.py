@@ -12,10 +12,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/accounts/", include(("accounts.urls", "accounts"), namespace="accounts")),
     path("api/chat/", include(("chat.urls", "chat"), namespace="chat")),
-    path("api/image/", include("imagegen.urls")),
-    path("api/faceswap/", include(("faceswap.urls", "faceswap"), namespace="faceswap")),  # ← ADD THIS LINE
-
-
+    path("api/imagegen/", include("imagegen.urls")),  # ✅ Changed from "api/image/" to "api/imagegen/"
+    path("api/faceswap/", include(("faceswap.urls", "faceswap"), namespace="faceswap")),
 ]
 
 if settings.DEBUG:

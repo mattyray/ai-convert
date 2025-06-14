@@ -1,6 +1,6 @@
 import requests
 
-HF_API_URL = "https://mnraynor90-facefusion3-1.hf.space/run/predict"
+HF_API_URL = "https://mnraynor90-gradiowapi.hf.space/run/predict"
 
 def facefusion_via_hf(selfie_url, target_url):
     try:

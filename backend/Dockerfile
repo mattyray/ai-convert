@@ -58,6 +58,9 @@ RUN pip install --no-cache-dir dlib --verbose
 # Install face recognition
 RUN pip install --no-cache-dir face-recognition
 
+# Install face recognition models (CRITICAL FIX)
+RUN pip install --no-cache-dir git+https://github.com/ageitgey/face_recognition_models
+
 # Install remaining requirements
 RUN pip install --no-cache-dir -r requirements.txt
 

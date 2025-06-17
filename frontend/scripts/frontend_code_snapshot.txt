@@ -1,6 +1,6 @@
 # FRONTEND CODE SNAPSHOT
 # Generated for AI Face Swap App
-# Total files: 24
+# Total files: 26
 
 
 
@@ -259,6 +259,7 @@ module.exports = {
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
+    "@flydotio/dockerfile": "^0.7.10",
     "@tailwindcss/postcss": "^4.1.10",
     "@tailwindcss/postcss7-compat": "^2.2.17",
     "@types/react": "^19.1.2",
@@ -276,6 +277,34 @@ module.exports = {
     "vite": "^6.3.5"
   }
 }
+
+
+
+
+# ==== ./fly.toml ====
+
+# fly.toml app configuration file generated for frontend-delicate-pine-6591 on 2025-06-17T18:14:08-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'frontend-delicate-pine-6591'
+primary_region = 'ewr'
+
+[build]
+
+[http_service]
+  internal_port = 80
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
 
 
 
@@ -1339,6 +1368,57 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+
+
+# ==== ./Dockerfile ====
+
+# syntax = docker/dockerfile:1
+
+# Adjust NODE_VERSION as desired
+ARG NODE_VERSION=23.0.0
+FROM node:${NODE_VERSION}-slim AS base
+
+LABEL fly_launch_runtime="Vite"
+
+# Vite app lives here
+WORKDIR /app
+
+# Set production environment
+ENV NODE_ENV="production"
+
+
+# Throw-away build stage to reduce size of final image
+FROM base AS build
+
+# Install packages needed to build node modules
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3
+
+# Install node modules
+COPY package-lock.json package.json ./
+RUN npm ci --include=dev
+
+# Copy application code
+COPY . .
+
+# Build application
+RUN npm run build
+
+# Remove development dependencies
+RUN npm prune --omit=dev
+
+
+# Final stage for app image
+FROM nginx
+
+# Copy built application
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Start the server by default, this can be overwritten at runtime
+EXPOSE 80
+CMD [ "/usr/sbin/nginx", "-g", "daemon off;" ]
+
 
 
 

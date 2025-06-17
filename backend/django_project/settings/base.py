@@ -2,10 +2,9 @@ from environ import Env
 from pathlib import Path
 import stripe
 import os
+from django.core.management.utils import get_random_secret_key
 
 print("💥 settings.py loaded from latest build")
-# Add this section to your settings.py after the imports but before the installed apps
-
 
 # Cloudinary Configuration
 import cloudinary
@@ -14,9 +13,8 @@ import cloudinary.api
 
 # Initialize environment variables
 env = Env()
-Env.read_env()
 
-# Use CLOUDINARY_URL if available (Heroku style), otherwise use individual vars
+# For build time, provide defaults for all required env vars
 cloudinary_url = env('CLOUDINARY_URL', default='')
 if cloudinary_url:
     # Parse the cloudinary://api_key:api_secret@cloud_name format
@@ -31,13 +29,18 @@ if cloudinary_url:
         }
         print(f"✅ Cloudinary configured from CLOUDINARY_URL for cloud: {cloud_name}")
     else:
-        raise ValueError("Invalid CLOUDINARY_URL format")
+        print("⚠️  Invalid CLOUDINARY_URL format, using fallback")
+        CLOUDINARY_STORAGE = {
+            'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME', default='dddye9wli'),
+            'API_KEY': env('CLOUDINARY_API_KEY', default='dummy'),
+            'API_SECRET': env('CLOUDINARY_API_SECRET', default='dummy'),
+        }
 else:
     # Fallback to individual environment variables
     CLOUDINARY_STORAGE = {
         'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME', default='dddye9wli'),
-        'API_KEY': env('CLOUDINARY_API_KEY', default=''),
-        'API_SECRET': env('CLOUDINARY_API_SECRET', default=''),
+        'API_KEY': env('CLOUDINARY_API_KEY', default='dummy'),
+        'API_SECRET': env('CLOUDINARY_API_SECRET', default='dummy'),
     }
     print("⚠️  Using individual Cloudinary env vars")
 
@@ -48,27 +51,25 @@ cloudinary.config(
     secure=True
 )
 
-
-
 # Stripe
 STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY', default='pk_test_dummy')
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY', default='sk_test_dummy')
 STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET', default='whsec_dummy')
 stripe.api_key = STRIPE_SECRET_KEY
 
-OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="dummy")
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Security
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="No Secret Key Found")
+# Security - use Django's built-in secret key generator for build time
+SECRET_KEY = env("DJANGO_SECRET_KEY", default=get_random_secret_key())
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Hosts
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[
-    "localhost", "127.0.0.1", "0.0.0.0", "web"
+    "localhost", "127.0.0.1", "0.0.0.0", "web", "*.fly.dev"
 ])
 
 # Installed apps
@@ -78,14 +79,14 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'django.contrib.staticfiles',
+    'django.contrib.staticfiles',  # ✅ This is required for collectstatic
     'cloudinary_storage',
     'cloudinary',
 
     # Custom apps
     'accounts.apps.AccountsConfig',
     'chat.apps.ChatConfig',
-    'faceswap.apps.FaceswapConfig',  # Add this line
+    'faceswap.apps.FaceswapConfig',
 
     # Third-party
     'django.contrib.sites',
@@ -97,18 +98,13 @@ INSTALLED_APPS = [
     'imagegen',
     'corsheaders',
 
-
-
     'rest_framework',
     'rest_framework.authtoken', 
-
-
 ]
 
 # Middleware
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
-
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -141,9 +137,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'django_project.wsgi.application'
 
-# Database
+# Database - provide default for build time
 DATABASES = {
-    "default": env.db_url("DATABASE_URL")
+    "default": env.db_url("DATABASE_URL", default="sqlite:///tmp/build.db")
 }
 
 # Auth
@@ -191,10 +187,10 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static
+# Static files - properly configured for collectstatic
 STATIC_URL = "/static/"
-STATICFILES_DIRS = [BASE_DIR.parent / "static"]
-STATIC_ROOT = BASE_DIR.parent / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR.parent / "static"] if (BASE_DIR.parent / "static").exists() else []
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Media
@@ -234,19 +230,21 @@ else:
 # Other
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ]
 }
+
 HUGGINGFACE_FACESWAP_URL = env('HUGGINGFACE_FACESWAP_URL', 
     default='https://mnraynor90-facefusionfastapi.hf.space')
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:5173",
+    "https://*.netlify.app",  # Will be updated with actual Netlify URL
+    "https://*.fly.dev",      # Allow all fly.dev subdomains
 ]
 
 CORS_ALLOW_CREDENTIALS = True

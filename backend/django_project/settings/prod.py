@@ -1,5 +1,6 @@
 from .base import *
 import dj_database_url
+import os
 
 DEBUG = False
 
@@ -12,6 +13,8 @@ X_FRAME_OPTIONS = 'DENY'
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 
 # Static files for production
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
@@ -24,21 +27,26 @@ DATABASES = {
 
 # Allowed hosts - update with your Fly.io app name
 ALLOWED_HOSTS = [
-    'your-faceswap-app.fly.dev',  # Replace with your actual app name
+    'ai-face-swap-app.fly.dev',
     'localhost',
     '127.0.0.1',
 ]
 
-# CORS settings if you have a separate frontend
+# CORS settings for your frontend
 CORS_ALLOWED_ORIGINS = [
-    "https://your-frontend-domain.com",  # Replace with your frontend domain
-    "https://your-faceswap-app.fly.dev",
+    "https://your-frontend-app.netlify.app",  # Will update after frontend deployment
+    "https://ai-face-swap-app.fly.dev",
 ]
 
-# Stripe settings
-STRIPE_PUBLISHABLE_KEY = env("STRIPE_PUBLISHABLE_KEY")
-STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET")
+# Add health check URL
+from django.urls import path, include
+from django.http import JsonResponse
+
+def health_check(request):
+    return JsonResponse({"status": "healthy"})
+
+# Add to your main urls.py
+# path('health/', health_check, name='health-check'),
 
 # Logging for production
 LOGGING = {

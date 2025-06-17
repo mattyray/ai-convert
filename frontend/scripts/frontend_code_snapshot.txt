@@ -1,360 +1,10 @@
 # FRONTEND CODE SNAPSHOT
 # Generated for AI Face Swap App
-# Total files: 23
+# Total files: 24
 
 
 
-# ==== src/App.tsx ====
-
-import React, { useState } from 'react';
-import { Sparkles, AlertCircle, History } from 'lucide-react';
-import FileUpload from './components/FileUpload';
-import ProcessingStatus from './components/ProcessingStatus';
-import ResultDisplay from './components/ResultDisplay';
-import { FaceSwapAPI } from './services/api';
-import { FaceSwapResult } from './types';
-
-type AppState = 'upload' | 'processing' | 'result' | 'error';
-
-function App() {
-  const [state, setState] = useState<AppState>('upload');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [result, setResult] = useState<FaceSwapResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [processing, setProcessing] = useState({
-    step: 'uploading' as const,
-    progress: 0,
-    message: 'Preparing your transformation...',
-    matchedFigure: undefined as string | undefined,
-  });
-
-  const handleFileSelect = (file: File) => {
-    setSelectedFile(file);
-    setError(null);
-  };
-
-  const handleClearFile = () => {
-    setSelectedFile(null);
-    setError(null);
-  };
-
-  const handleStartProcessing = async () => {
-    if (!selectedFile) return;
-
-    setState('processing');
-    setError(null);
-    
-    try {
-      // Simulate processing steps for better UX
-      const updateProgress = (step: typeof processing.step, progress: number, message: string, matchedFigure?: string) => {
-        setProcessing({ step, progress, message, matchedFigure });
-      };
-
-      // Step 1: Uploading
-      updateProgress('uploading', 10, 'Uploading your selfie securely...');
-      
-      // Step 2: Start the API call
-      updateProgress('analyzing', 25, 'AI is analyzing your facial features...');
-      
-      const apiPromise = FaceSwapAPI.generateFaceSwap(selectedFile, (uploadProgress) => {
-        updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
-      });
-      
-      // Simulate analysis step
-      setTimeout(() => {
-        updateProgress('analyzing', 45, 'Identifying unique facial characteristics...');
-      }, 1000);
-      
-      // Simulate matching step
-      setTimeout(() => {
-        updateProgress('matching', 65, 'Searching through historical figures...');
-      }, 2500);
-      
-      // Wait for API response
-      const apiResult = await apiPromise;
-      
-      // Step 3: Show match found
-      updateProgress('matching', 80, `Perfect match found: ${apiResult.match_name}!`, apiResult.match_name);
-      
-      // Step 4: Face swapping
-      setTimeout(() => {
-        updateProgress('swapping', 95, `Transforming you into ${apiResult.match_name}...`, apiResult.match_name);
-      }, 1000);
-      
-      // Step 5: Complete
-      setTimeout(() => {
-        setResult(apiResult);
-        setState('result');
-      }, 2000);
-      
-    } catch (err) {
-      console.error('Face swap error:', err);
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
-      setState('error');
-    }
-  };
-
-  const handleTryAgain = () => {
-    setState('upload');
-    setSelectedFile(null);
-    setResult(null);
-    setError(null);
-    setProcessing({
-      step: 'uploading',
-      progress: 0,
-      message: 'Preparing your transformation...',
-      matchedFigure: undefined,
-    });
-  };
-
-  const renderContent = () => {
-    switch (state) {
-      case 'upload':
-        return (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-8">
-              <div className="flex items-center justify-center mb-4">
-                <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-full p-3">
-                  <Sparkles className="w-8 h-8 text-white" />
-                </div>
-              </div>
-              <h1 className="text-4xl font-bold text-gray-900 mb-4">
-                AI Historical Face Swap
-              </h1>
-              <p className="text-xl text-gray-600 mb-6">
-                Discover which historical figure you resemble and see yourself transformed!
-              </p>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
-                <p className="text-blue-800 text-sm">
-                  🎭 Our AI will analyze your facial features and match you with historical figures like Napoleon, Cleopatra, Leonardo da Vinci, and more!
-                </p>
-              </div>
-            </div>
-
-            <FileUpload
-              onFileSelect={handleFileSelect}
-              selectedFile={selectedFile}
-              onClear={handleClearFile}
-            />
-
-            {selectedFile && (
-              <div className="mt-8 text-center">
-                <button
-                  onClick={handleStartProcessing}
-                  className="btn-primary text-lg px-8 py-4"
-                >
-                  🔮 Find My Historical Twin
-                </button>
-                <p className="text-sm text-gray-500 mt-3">
-                  This will take about 30 seconds
-                </p>
-              </div>
-            )}
-
-            {/* Historical Figures Preview */}
-            <div className="mt-12 text-center">
-              <h3 className="text-lg font-semibold text-gray-900 mb-6">
-                Meet Some Historical Figures
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
-                {[
-                  { name: 'Napoleon', emoji: '👑' },
-                  { name: 'Cleopatra', emoji: '🏺' },
-                  { name: 'Leonardo da Vinci', emoji: '🎨' },
-                  { name: 'Marie Antoinette', emoji: '👸' },
-                  { name: 'JFK', emoji: '🇺🇸' },
-                  { name: 'Frida Kahlo', emoji: '🌺' },
-                ].map((figure) => (
-                  <div key={figure.name} className="text-center p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
-                    <div className="text-2xl mb-2">{figure.emoji}</div>
-                    <div className="text-xs text-gray-600 font-medium">{figure.name}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'processing':
-        return (
-          <div className="max-w-xl mx-auto">
-            <ProcessingStatus
-              step={processing.step}
-              progress={processing.progress}
-              message={processing.message}
-              matchedFigure={processing.matchedFigure}
-            />
-          </div>
-        );
-
-      case 'result':
-        return result ? (
-          <div className="max-w-4xl mx-auto">
-            <ResultDisplay
-              result={result}
-              onTryAgain={handleTryAgain}
-            />
-          </div>
-        ) : null;
-
-      case 'error':
-        return (
-          <div className="max-w-xl mx-auto">
-            <div className="bg-red-50 border border-red-200 rounded-xl p-8 text-center">
-              <div className="flex items-center justify-center mb-4">
-                <AlertCircle className="w-12 h-12 text-red-500" />
-              </div>
-              <h3 className="text-xl font-semibold text-red-900 mb-4">
-                Oops! Something went wrong
-              </h3>
-              <p className="text-red-700 mb-6">
-                {error}
-              </p>
-              <div className="space-y-3">
-                <button
-                  onClick={handleTryAgain}
-                  className="btn-primary w-full"
-                >
-                  Try Again
-                </button>
-                <p className="text-sm text-red-600">
-                  Make sure your photo shows a clear face and is under 10MB
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg p-2">
-                <History className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">HistoryFace</h1>
-                <p className="text-sm text-gray-500">AI Historical Transformation</p>
-              </div>
-            </div>
-            
-            {state !== 'upload' && (
-              <button
-                onClick={handleTryAgain}
-                className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                ← Start Over
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {renderContent()}
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-gray-50 border-t border-gray-200 mt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="text-center">
-            <p className="text-gray-600 text-sm">
-              Powered by AI face recognition and historical figure matching
-            </p>
-            <p className="text-gray-500 text-xs mt-2">
-              Your photos are processed securely and not stored permanently
-            </p>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-export default App;
-
-
-
-# ==== src/main.tsx ====
-
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import App from './App.tsx'
-import ErrorBoundary from './components/ErrorBoundary.tsx'
-import './index.css'
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-)
-
-
-
-# ==== src/App.css ====
-
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
-
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
-}
-
-
-
-
-# ==== src/index.css ====
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+# ==================== Configuration Files ====================
 
 
 
@@ -396,9 +46,495 @@ export interface HistoricalFigure {
 
 
 
+# ==== src/services/api.ts ====
+
+import axios from 'axios';
+import { FaceSwapResult, ApiError } from '../types';
+
+// Use environment variables or fallback to dev defaults
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8002/api';
+const API_TOKEN = import.meta.env.VITE_API_TOKEN || '90cc43ca30091f85a96b4ce3647ffa7b0f46e8f3';
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Authorization': `Token ${API_TOKEN}`,
+  },
+  timeout: 300000, // 5 minutes for face swap processing
+});
+
+// Add request interceptor for debugging
+api.interceptors.request.use((config) => {
+  console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+  return config;
+});
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => {
+    console.log(`✅ API Response: ${response.status} ${response.config.url}`);
+    return response;
+  },
+  (error) => {
+    console.error(`❌ API Error: ${error.response?.status} ${error.config?.url}`, error.response?.data);
+    return Promise.reject(error);
+  }
+);
+
+export class FaceSwapAPI {
+  static async generateFaceSwap(
+    selfieFile: File,
+    onProgress?: (progress: number) => void
+  ): Promise<FaceSwapResult> {
+    const formData = new FormData();
+    formData.append('selfie', selfieFile);
+
+    try {
+      console.log(`📤 Uploading file: ${selfieFile.name} (${(selfieFile.size / 1024 / 1024).toFixed(1)}MB)`);
+      
+      const response = await api.post<FaceSwapResult>('/imagegen/generate/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(progress);
+          }
+        },
+      });
+
+      console.log('✅ Face swap successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Face swap failed:', error);
+      
+      if (axios.isAxiosError(error)) {
+        if (error.code === 'ECONNREFUSED') {
+          throw new Error('Cannot connect to server. Make sure the backend is running on port 8002.');
+        }
+        
+        if (error.response?.status === 401) {
+          throw new Error('Authentication failed. Please check your API token.');
+        }
+        
+        if (error.response?.status === 413) {
+          throw new Error('File too large. Please use an image under 10MB.');
+        }
+        
+        if (error.response?.data) {
+          const apiError = error.response.data as ApiError;
+          throw new Error(apiError.error || `Server error: ${error.response.status}`);
+        }
+      }
+      
+      throw new Error('Network error. Please check your connection and try again.');
+    }
+  }
+
+  static async getImageStatus(id: number): Promise<FaceSwapResult> {
+    try {
+      const response = await api.get<FaceSwapResult>(`/imagegen/status/${id}/`);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Status check failed:', error);
+      throw new Error('Failed to check image status');
+    }
+  }
+
+  static async testConnection(): Promise<boolean> {
+    try {
+      await api.get('/');
+      return true;
+    } catch (error) {
+      console.error('❌ Connection test failed:', error);
+      return false;
+    }
+  }
+}
+
+export default api;
+
+
+
+# ==== ./tsconfig.node.json ====
+
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.ts"]
+}
+
+
+
+
+# ==== ./tailwind.config.js ====
+
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+
+
+
+# ==== ./tsconfig.app.json ====
+
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src"]
+}
+
+
+
+
+# ==== ./package.json ====
+
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "lucide-react": "^0.516.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-dropzone": "^14.3.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.0",
+    "@tailwindcss/postcss": "^4.1.10",
+    "@tailwindcss/postcss7-compat": "^2.2.17",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.25.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "globals": "^16.0.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.10",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.30.1",
+    "vite": "^6.3.5"
+  }
+}
+
+
+
+
+# ==== ./tsconfig.json ====
+
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
+
+
+
+
+# ==== ./eslint.config.js ====
+
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  { ignores: ['dist'] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+    },
+  },
+)
+
+
+
+
+# ==== ./vite.config.ts ====
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
+
+
+
+
+# ==== ./postcss.config.js ====
+
+export default {
+  plugins: {
+    '@tailwindcss/postcss': {},
+    autoprefixer: {},
+  },
+}
+
+
+
+# ==================== React Components & Logic ====================
+
+
+
 # ==== src/components/ProcessingStatus.tsx ====
 
+import React from 'react';
+import { Loader2, Search, Users, Sparkles, CheckCircle } from 'lucide-react';
 
+interface ProcessingStatusProps {
+  step: 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+  progress: number;
+  message: string;
+  matchedFigure?: string;
+}
+
+const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
+  step,
+  progress,
+  message,
+  matchedFigure
+}) => {
+  const steps = [
+    {
+      key: 'uploading',
+      label: 'Uploading',
+      icon: Loader2,
+      description: 'Securely uploading your photo'
+    },
+    {
+      key: 'analyzing',
+      label: 'Analyzing',
+      icon: Search,
+      description: 'AI analyzing facial features'
+    },
+    {
+      key: 'matching',
+      label: 'Matching',
+      icon: Users,
+      description: 'Finding historical matches'
+    },
+    {
+      key: 'swapping',
+      label: 'Transforming',
+      icon: Sparkles,
+      description: 'Creating your transformation'
+    },
+  ];
+
+  const getStepStatus = (stepKey: string) => {
+    const stepIndex = steps.findIndex(s => s.key === stepKey);
+    const currentStepIndex = steps.findIndex(s => s.key === step);
+    
+    if (stepIndex < currentStepIndex) return 'completed';
+    if (stepIndex === currentStepIndex) return 'active';
+    return 'pending';
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg p-8">
+      {/* Header */}
+      <div className="text-center mb-8">
+        <div className="flex items-center justify-center mb-4">
+          <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-full p-3">
+            <Sparkles className="w-8 h-8 text-white" />
+          </div>
+        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+          Creating Your Transformation
+        </h2>
+        <p className="text-gray-600">
+          {message}
+        </p>
+        {matchedFigure && (
+          <div className="mt-4 inline-block bg-green-50 border border-green-200 rounded-lg px-4 py-2">
+            <p className="text-green-800 font-medium">
+              ✨ Matched with {matchedFigure}!
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Progress Bar */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+          <span>Progress</span>
+          <span>{progress}%</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-3">
+          <div
+            className="bg-gradient-to-r from-blue-500 to-purple-500 h-3 rounded-full transition-all duration-500 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Steps */}
+      <div className="space-y-4">
+        {steps.map((stepItem, index) => {
+          const status = getStepStatus(stepItem.key);
+          const Icon = stepItem.icon;
+          
+          return (
+            <div
+              key={stepItem.key}
+              className={`flex items-center p-4 rounded-lg transition-all duration-300 ${
+                status === 'active'
+                  ? 'bg-blue-50 border border-blue-200'
+                  : status === 'completed'
+                  ? 'bg-green-50 border border-green-200'
+                  : 'bg-gray-50 border border-gray-200'
+              }`}
+            >
+              <div
+                className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center mr-4 ${
+                  status === 'active'
+                    ? 'bg-blue-500 text-white'
+                    : status === 'completed'
+                    ? 'bg-green-500 text-white'
+                    : 'bg-gray-300 text-gray-600'
+                }`}
+              >
+                {status === 'completed' ? (
+                  <CheckCircle size={20} />
+                ) : status === 'active' ? (
+                  <Icon size={20} className="animate-spin" />
+                ) : (
+                  <Icon size={20} />
+                )}
+              </div>
+              
+              <div className="flex-grow">
+                <div
+                  className={`font-medium ${
+                    status === 'active'
+                      ? 'text-blue-900'
+                      : status === 'completed'
+                      ? 'text-green-900'
+                      : 'text-gray-600'
+                  }`}
+                >
+                  {stepItem.label}
+                </div>
+                <div
+                  className={`text-sm ${
+                    status === 'active'
+                      ? 'text-blue-700'
+                      : status === 'completed'
+                      ? 'text-green-700'
+                      : 'text-gray-500'
+                  }`}
+                >
+                  {stepItem.description}
+                </div>
+              </div>
+              
+              <div className="flex-shrink-0">
+                {status === 'active' && (
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" />
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                  </div>
+                )}
+                {status === 'completed' && (
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Fun fact while waiting */}
+      <div className="mt-8 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+        <p className="text-purple-800 text-sm text-center">
+          💡 <strong>Did you know?</strong> Our AI analyzes over 100 facial landmarks to find your perfect historical match!
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default ProcessingStatus;
 
 
 
@@ -783,102 +919,105 @@ export default ErrorBoundary;
 
 
 
+# ==================== Assets & Styles ====================
+
+
+
+# ==== src/App.css ====
+
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+
+
+
+# ==== src/index.css ====
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Add these classes to your src/index.css file after the Tailwind imports */
+
+@layer components {
+  .btn-primary {
+    @apply bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+  }
+  
+  .btn-secondary {
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg border border-gray-300 hover:border-gray-400 transition-all duration-200 shadow-sm hover:shadow-md;
+  }
+  
+  .btn-danger {
+    @apply bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl;
+  }
+  
+  /* Custom animations */
+  @keyframes pulse-slow {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+  
+  .animate-pulse-slow {
+    animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+
+
 # ==== src/assets/react.svg ====
 
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
 
 
 
-# ==== src/services/api.ts ====
-
-import axios from 'axios';
-import { FaceSwapResult, ApiError } from '../types';
-
-const API_BASE_URL = 'http://127.0.0.1:8002/api';
-const API_TOKEN = '90cc43ca30091f85a96b4ce3647ffa7b0f46e8f3';
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Authorization': `Token ${API_TOKEN}`,
-  },
-});
-
-export class FaceSwapAPI {
-  static async generateFaceSwap(
-    selfieFile: File,
-    onProgress?: (progress: number) => void
-  ): Promise<FaceSwapResult> {
-    const formData = new FormData();
-    formData.append('selfie', selfieFile);
-
-    try {
-      const response = await api.post<FaceSwapResult>('/imagegen/generate/', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total && onProgress) {
-            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            onProgress(progress);
-          }
-        },
-      });
-
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.data) {
-        const apiError = error.response.data as ApiError;
-        throw new Error(apiError.error || 'Face swap failed');
-      }
-      throw new Error('Network error. Please try again.');
-    }
-  }
-
-  static async getImageStatus(id: number): Promise<FaceSwapResult> {
-    const response = await api.get<FaceSwapResult>(`/imagegen/status/${id}/`);
-    return response.data;
-  }
-}
-
-export default api;
-
-
-
 # ==== public/vite.svg ====
 
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
-
-
-
-# ==== ./tsconfig.node.json ====
-
-{
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-    "target": "ES2022",
-    "lib": ["ES2023"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
-  },
-  "include": ["vite.config.ts"]
-}
-
 
 
 
@@ -901,52 +1040,305 @@ export default api;
 
 
 
-# ==== ./tailwind.config.js ====
+# ==================== Other Files ====================
 
-/** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
+
+
+# ==== src/App.tsx ====
+
+import React, { useState } from 'react';
+import { Sparkles, AlertCircle, History } from 'lucide-react';
+import FileUpload from './components/FileUpload';
+import ProcessingStatus from './components/ProcessingStatus';
+import ResultDisplay from './components/ResultDisplay';
+import { FaceSwapAPI } from './services/api';
+import { FaceSwapResult } from './types';
+
+type AppState = 'upload' | 'processing' | 'result' | 'error';
+
+function App() {
+  const [state, setState] = useState<AppState>('upload');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [result, setResult] = useState<FaceSwapResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState({
+    step: 'uploading' as const,
+    progress: 0,
+    message: 'Preparing your transformation...',
+    matchedFigure: undefined as string | undefined,
+  });
+
+  const handleFileSelect = (file: File) => {
+    setSelectedFile(file);
+    setError(null);
+  };
+
+  const handleClearFile = () => {
+    setSelectedFile(null);
+    setError(null);
+  };
+
+  const handleStartProcessing = async () => {
+    if (!selectedFile) return;
+
+    setState('processing');
+    setError(null);
+    
+    try {
+      // Simulate processing steps for better UX
+      const updateProgress = (step: typeof processing.step, progress: number, message: string, matchedFigure?: string) => {
+        setProcessing({ step, progress, message, matchedFigure });
+      };
+
+      // Step 1: Uploading
+      updateProgress('uploading', 10, 'Uploading your selfie securely...');
+      
+      // Step 2: Start the API call
+      updateProgress('analyzing', 25, 'AI is analyzing your facial features...');
+      
+      const apiPromise = FaceSwapAPI.generateFaceSwap(selectedFile, (uploadProgress) => {
+        updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
+      });
+      
+      // Simulate analysis step
+      setTimeout(() => {
+        updateProgress('analyzing', 45, 'Identifying unique facial characteristics...');
+      }, 1000);
+      
+      // Simulate matching step
+      setTimeout(() => {
+        updateProgress('matching', 65, 'Searching through historical figures...');
+      }, 2500);
+      
+      // Wait for API response
+      const apiResult = await apiPromise;
+      
+      // Step 3: Show match found
+      updateProgress('matching', 80, `Perfect match found: ${apiResult.match_name}!`, apiResult.match_name);
+      
+      // Step 4: Face swapping
+      setTimeout(() => {
+        updateProgress('swapping', 95, `Transforming you into ${apiResult.match_name}...`, apiResult.match_name);
+      }, 1000);
+      
+      // Step 5: Complete
+      setTimeout(() => {
+        setResult(apiResult);
+        setState('result');
+      }, 2000);
+      
+    } catch (err) {
+      console.error('Face swap error:', err);
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setState('error');
+    }
+  };
+
+  const handleTryAgain = () => {
+    setState('upload');
+    setSelectedFile(null);
+    setResult(null);
+    setError(null);
+    setProcessing({
+      step: 'uploading',
+      progress: 0,
+      message: 'Preparing your transformation...',
+      matchedFigure: undefined,
+    });
+  };
+
+  const renderContent = () => {
+    switch (state) {
+      case 'upload':
+        return (
+          <div className="max-w-2xl mx-auto">
+            <div className="text-center mb-8">
+              <div className="flex items-center justify-center mb-4">
+                <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-full p-3">
+                  <Sparkles className="w-8 h-8 text-white" />
+                </div>
+              </div>
+              <h1 className="text-4xl font-bold text-gray-900 mb-4">
+                AI Historical Face Swap
+              </h1>
+              <p className="text-xl text-gray-600 mb-6">
+                Discover which historical figure you resemble and see yourself transformed!
+              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
+                <p className="text-blue-800 text-sm">
+                  🎭 Our AI will analyze your facial features and match you with historical figures like Napoleon, Cleopatra, Leonardo da Vinci, and more!
+                </p>
+              </div>
+            </div>
+
+            <FileUpload
+              onFileSelect={handleFileSelect}
+              selectedFile={selectedFile}
+              onClear={handleClearFile}
+            />
+
+            {selectedFile && (
+              <div className="mt-8 text-center">
+                <button
+                  onClick={handleStartProcessing}
+                  className="btn-primary text-lg px-8 py-4"
+                >
+                  🔮 Find My Historical Twin
+                </button>
+                <p className="text-sm text-gray-500 mt-3">
+                  This will take about 30 seconds
+                </p>
+              </div>
+            )}
+
+            {/* Historical Figures Preview */}
+            <div className="mt-12 text-center">
+              <h3 className="text-lg font-semibold text-gray-900 mb-6">
+                Meet Some Historical Figures
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+                {[
+                  { name: 'Napoleon', emoji: '👑' },
+                  { name: 'Cleopatra', emoji: '🏺' },
+                  { name: 'Leonardo da Vinci', emoji: '🎨' },
+                  { name: 'Marie Antoinette', emoji: '👸' },
+                  { name: 'JFK', emoji: '🇺🇸' },
+                  { name: 'Frida Kahlo', emoji: '🌺' },
+                ].map((figure) => (
+                  <div key={figure.name} className="text-center p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+                    <div className="text-2xl mb-2">{figure.emoji}</div>
+                    <div className="text-xs text-gray-600 font-medium">{figure.name}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'processing':
+        return (
+          <div className="max-w-xl mx-auto">
+            <ProcessingStatus
+              step={processing.step}
+              progress={processing.progress}
+              message={processing.message}
+              matchedFigure={processing.matchedFigure}
+            />
+          </div>
+        );
+
+      case 'result':
+        return result ? (
+          <div className="max-w-4xl mx-auto">
+            <ResultDisplay
+              result={result}
+              onTryAgain={handleTryAgain}
+            />
+          </div>
+        ) : null;
+
+      case 'error':
+        return (
+          <div className="max-w-xl mx-auto">
+            <div className="bg-red-50 border border-red-200 rounded-xl p-8 text-center">
+              <div className="flex items-center justify-center mb-4">
+                <AlertCircle className="w-12 h-12 text-red-500" />
+              </div>
+              <h3 className="text-xl font-semibold text-red-900 mb-4">
+                Oops! Something went wrong
+              </h3>
+              <p className="text-red-700 mb-6">
+                {error}
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={handleTryAgain}
+                  className="btn-primary w-full"
+                >
+                  Try Again
+                </button>
+                <p className="text-sm text-red-600">
+                  Make sure your photo shows a clear face and is under 10MB
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg p-2">
+                <History className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">HistoryFace</h1>
+                <p className="text-sm text-gray-500">AI Historical Transformation</p>
+              </div>
+            </div>
+            
+            {state !== 'upload' && (
+              <button
+                onClick={handleTryAgain}
+                className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                ← Start Over
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {renderContent()}
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-gray-50 border-t border-gray-200 mt-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center">
+            <p className="text-gray-600 text-sm">
+              Powered by AI face recognition and historical figure matching
+            </p>
+            <p className="text-gray-500 text-xs mt-2">
+              Your photos are processed securely and not stored permanently
+            </p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
 }
 
+export default App;
 
 
-# ==== ./tsconfig.app.json ====
 
-{
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
+# ==== src/main.tsx ====
 
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-    "jsx": "react-jsx",
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.tsx'
+import ErrorBoundary from './components/ErrorBoundary.tsx'
+import './index.css'
 
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
-  },
-  "include": ["src"]
-}
-
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </StrictMode>,
+)
 
 
 
@@ -1010,115 +1402,26 @@ export default tseslint.config({
 
 
 
-# ==== ./package.json ====
+# ==== ./Dockerfile.dev ====
 
-{
-  "name": "frontend",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "axios": "^1.10.0",
-    "lucide-react": "^0.516.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "react-dropzone": "^14.3.8"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.25.0",
-    "@tailwindcss/postcss": "^4.1.10",
-    "@tailwindcss/postcss7-compat": "^2.2.17",
-    "@types/react": "^19.1.2",
-    "@types/react-dom": "^19.1.2",
-    "@vitejs/plugin-react": "^4.4.1",
-    "autoprefixer": "^10.4.21",
-    "eslint": "^9.25.0",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.19",
-    "globals": "^16.0.0",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.10",
-    "typescript": "~5.8.3",
-    "typescript-eslint": "^8.30.1",
-    "vite": "^6.3.5"
-  }
-}
+# Development Dockerfile for React frontend
+FROM node:18-alpine
 
+# Set working directory
+WORKDIR /app
 
+# Copy package files
+COPY package*.json ./
 
+# Install dependencies
+RUN npm install
 
-# ==== ./tsconfig.json ====
+# Copy source code
+COPY . .
 
-{
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
-}
+# Expose port
+EXPOSE 5173
 
-
-
-
-# ==== ./eslint.config.js ====
-
-import js from '@eslint/js'
-import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
-import tseslint from 'typescript-eslint'
-
-export default tseslint.config(
-  { ignores: ['dist'] },
-  {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ['**/*.{ts,tsx}'],
-    languageOptions: {
-      ecmaVersion: 2020,
-      globals: globals.browser,
-    },
-    plugins: {
-      'react-hooks': reactHooks,
-      'react-refresh': reactRefresh,
-    },
-    rules: {
-      ...reactHooks.configs.recommended.rules,
-      'react-refresh/only-export-components': [
-        'warn',
-        { allowConstantExport: true },
-      ],
-    },
-  },
-)
-
-
-
-
-# ==== ./vite.config.ts ====
-
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-})
-
-
-
-
-# ==== ./postcss.config.js ====
-
-export default {
-  plugins: {
-    '@tailwindcss/postcss': {},
-    autoprefixer: {},
-  },
-}
+# Start development server
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 

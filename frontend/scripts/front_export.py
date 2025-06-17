@@ -13,7 +13,7 @@ def detect_directories():
     # Check if we're in project root and frontend exists
     elif os.path.exists("frontend"):
         print("📍 Detected: Running from project root")
-        return ["frontend/src", "frontend/public", "frontend"], "frontend/scripts/frontend_code_snapshot.txt"
+        return ["frontend/src", "frontend/public", "frontend"], "scripts/frontend_code_snapshot.txt"
     
     # Check if we're in project root but no frontend directory
     elif os.path.exists("backend"):
@@ -27,7 +27,8 @@ def detect_directories():
 # File extensions to include
 INCLUDE_EXTENSIONS = [
     ".ts", ".tsx", ".js", ".jsx", ".json", ".html", ".css", ".scss", 
-    ".md", ".svg", ".ico", ".png", ".jpg", ".jpeg", ".gif", ".webp"
+    ".md", ".svg", ".ico", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".toml", ".yml", ".yaml", ".env.template", ".env.example"  # Added config files
 ]
 
 # Directories to exclude
@@ -36,16 +37,29 @@ EXCLUDE_DIRS = {
     "__pycache__", ".git", ".vscode", ".idea", "tmp", "temp"
 }
 
-# Files to exclude
+# Files to exclude (but allow .env.template and .env.example)
 EXCLUDE_FILES = {
     "package-lock.json", "yarn.lock", "pnpm-lock.yaml", ".DS_Store",
-    "Thumbs.db", ".env.local", ".env.development", ".env.production"
+    "Thumbs.db", ".env.local", ".env.development", ".env.production", ".env"  # Exclude real .env but allow templates
 }
+
+# Important root files to always include
+IMPORTANT_ROOT_FILES = [
+    "package.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js",
+    "tsconfig.json", "tsconfig.app.json", "tsconfig.node.json", 
+    "eslint.config.js", "index.html", "README.md",
+    "netlify.toml", "Dockerfile", "Dockerfile.dev", ".env.template", ".env.example"
+]
 
 def should_include_file(file_path, filename):
     """Check if file should be included based on extension and exclusion rules"""
     if filename in EXCLUDE_FILES:
         return False
+    
+    # Always include important root files
+    if filename in IMPORTANT_ROOT_FILES:
+        return True
+        
     return any(file_path.endswith(ext) for ext in INCLUDE_EXTENSIONS)
 
 def walk_and_collect(include_dirs):
@@ -99,14 +113,41 @@ def write_snapshot(files, output_path):
         out.write("# Generated for AI Face Swap App\n")
         out.write(f"# Total files: {len(files)}\n\n")
         
+        # Group files by type for better organization
+        config_files = []
+        component_files = []
+        asset_files = []
+        other_files = []
+        
         for path, code in files:
-            out.write(f"\n\n# ==== {path} ====\n\n")
-            out.write(code)
-            out.write("\n\n")
+            if any(path.endswith(ext) for ext in ['.json', '.js', '.ts', '.toml', '.yml', '.yaml']) and not '/src/' in path:
+                config_files.append((path, code))
+            elif '/components/' in path or '/services/' in path or '/types/' in path:
+                component_files.append((path, code))
+            elif any(path.endswith(ext) for ext in ['.svg', '.png', '.jpg', '.css', '.html']):
+                asset_files.append((path, code))
+            else:
+                other_files.append((path, code))
+        
+        # Write in organized sections
+        sections = [
+            ("Configuration Files", config_files),
+            ("React Components & Logic", component_files),
+            ("Assets & Styles", asset_files),
+            ("Other Files", other_files)
+        ]
+        
+        for section_name, section_files in sections:
+            if section_files:
+                out.write(f"\n\n# ==================== {section_name} ====================\n\n")
+                for path, code in section_files:
+                    out.write(f"\n\n# ==== {path} ====\n\n")
+                    out.write(code)
+                    out.write("\n\n")
 
 def main():
     """Main execution function"""
-    print("🚀 Starting smart frontend code snapshot generation...")
+    print("🚀 Starting comprehensive frontend code snapshot generation...")
     
     # Auto-detect directories
     include_dirs, output_path = detect_directories()
@@ -130,15 +171,34 @@ def main():
     print(f"✅ Frontend snapshot created: {output_path}")
     print(f"📊 Files included: {len(collected_files)}")
     
-    # Print summary of file types
+    # Print detailed summary
     file_types = {}
+    important_files_found = []
+    
     for path, _ in collected_files:
+        filename = os.path.basename(path)
         ext = os.path.splitext(path)[1] or "no extension"
         file_types[ext] = file_types.get(ext, 0) + 1
+        
+        if filename in IMPORTANT_ROOT_FILES:
+            important_files_found.append(filename)
     
     print("\n📋 File types included:")
     for ext, count in sorted(file_types.items()):
         print(f"  • {ext}: {count} files")
+    
+    print(f"\n🎯 Important config files found: {len(important_files_found)}")
+    for file in sorted(important_files_found):
+        print(f"  ✅ {file}")
+    
+    # Check for missing important files
+    missing_files = set(IMPORTANT_ROOT_FILES) - set(important_files_found)
+    if missing_files:
+        print(f"\n⚠️  Missing important files: {len(missing_files)}")
+        for file in sorted(missing_files):
+            print(f"  ❌ {file}")
+            
+    print(f"\n💡 Tip: If files are missing, they might not exist yet or need to be created.")
 
 if __name__ == "__main__":
     main()

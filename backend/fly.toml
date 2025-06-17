@@ -1,37 +1,33 @@
-# fly.toml app configuration file generated for your face-swap app
+# fly.toml app configuration file generated for ai-face-swap-app on 2025-06-17T18:20:43-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "ai-convert"
-primary_region = "ord"
+app = 'ai-face-swap-app'
+primary_region = 'ewr'
+console_command = '/code/manage.py shell'
 
 [build]
+
+[deploy]
+  release_command = 'python manage.py migrate --noinput'
+
+[env]
+  PORT = '8000'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
-
-  [[http_service.checks]]
-    grace_period = "10s"
-    interval = "30s"
-    method = "GET"
-    timeout = "5s"
-    path = "/health/"
-
-[env]
-  DJANGO_SETTINGS_MODULE = "django_project.settings.prod"
-  PORT = "8000"
-
-[[statics]]
-  guest_path = "/code/staticfiles"
-  url_prefix = "/static/"
-
-[deploy]
-  release_command = "python manage.py migrate"
+  processes = ['app']
 
 [[vm]]
-  memory = "1gb"
-  cpu_kind = "shared"
+  memory = '2gb'
+  cpu_kind = 'shared'
   cpus = 1
+
+[[statics]]
+  guest_path = '/code/static'
+  url_prefix = '/static/'

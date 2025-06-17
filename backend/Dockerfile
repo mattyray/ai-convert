@@ -1,36 +1,30 @@
-# Use official Python image as base
-FROM python:3.10.4-slim-bullseye
+ARG PYTHON_VERSION=3.12-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+FROM python:${PYTHON_VERSION}
 
-# Set working directory
-WORKDIR /code
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
 
-# Install system dependencies needed for dlib, face_recognition, etc.
+# install psycopg2 dependencies.
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    libboost-all-dev \
-    libatlas-base-dev \
-    libgtk-3-dev \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    gcc \
     libpq-dev \
-    git \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install them
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN mkdir -p /code
 
-# Copy the entire project
-COPY . .
+WORKDIR /code
 
-# Default command (used for production; overridden in docker-compose for dev)
-CMD ["gunicorn", "django_project.wsgi", "--bind", "0.0.0.0:8000"]
+COPY requirements.txt /tmp/requirements.txt
+RUN set -ex && \
+    pip install --upgrade pip && \
+    pip install -r /tmp/requirements.txt && \
+    rm -rf /root/.cache/
+COPY . /code
+
+ENV SECRET_KEY "OqItyMicM3woGB5JvUTLWohrKpRqCuRpZNtQoRa0rQbBx7jb7v"
+RUN python manage.py collectstatic --noinput
+
+EXPOSE 8000
+
+CMD ["gunicorn","--bind",":8000","--workers","2","django_project.wsgi"]

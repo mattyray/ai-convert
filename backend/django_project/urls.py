@@ -7,12 +7,16 @@ from django.http import JsonResponse
 def api_root(request):
     return JsonResponse({"message": "API is running!"})
 
+def health_check(request):
+    return JsonResponse({"status": "healthy"})
+
 urlpatterns = [
-    path("", api_root),  # ✅ Root path now responds
+    path("", api_root),
+    path("health/", health_check, name="health-check"),  # Add this line
     path("admin/", admin.site.urls),
     path("api/accounts/", include(("accounts.urls", "accounts"), namespace="accounts")),
     path("api/chat/", include(("chat.urls", "chat"), namespace="chat")),
-    path("api/imagegen/", include("imagegen.urls")),  # ✅ Changed from "api/image/" to "api/imagegen/"
+    path("api/imagegen/", include("imagegen.urls")),
     path("api/faceswap/", include(("faceswap.urls", "faceswap"), namespace="faceswap")),
 ]
 

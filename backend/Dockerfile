@@ -1,30 +1,76 @@
-ARG PYTHON_VERSION=3.12-slim
+# Use Python 3.12 slim image
+FROM python:3.12-slim
 
-FROM python:${PYTHON_VERSION}
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-
-# install psycopg2 dependencies.
+# Install system dependencies required for face-recognition and dlib
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    libopenblas-dev \
+    liblapack-dev \
+    libx11-dev \
+    libgtk-3-dev \
+    python3-dev \
+    python3-pip \
+    git \
+    wget \
+    pkg-config \
     libpq-dev \
     gcc \
+    g++ \
+    libatlas-base-dev \
+    gfortran \
+    libjpeg-dev \
+    libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /code
+# Set work directory
+WORKDIR /app
 
-WORKDIR /code
+# Copy requirements first for better caching
+COPY requirements.txt /app/
 
-COPY requirements.txt /tmp/requirements.txt
-RUN set -ex && \
-    pip install --upgrade pip && \
-    pip install -r /tmp/requirements.txt && \
-    rm -rf /root/.cache/
-COPY . /code
+# Upgrade pip and install wheel
+RUN pip install --no-cache-dir --upgrade pip wheel
 
-ENV SECRET_KEY "OqItyMicM3woGB5JvUTLWohrKpRqCuRpZNtQoRa0rQbBx7jb7v"
+# Install Python dependencies in stages for better debugging
+# First install numpy (required for dlib)
+RUN pip install --no-cache-dir numpy
+
+# Install dlib separately with verbose output
+RUN pip install --no-cache-dir dlib --verbose
+
+# Install face recognition
+RUN pip install --no-cache-dir face-recognition
+
+# Install remaining requirements
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project
+COPY . /app/
+
+# Create media directories
+RUN mkdir -p /app/media/uploads/selfies
+RUN mkdir -p /app/staticfiles
+
+# Collect static files
 RUN python manage.py collectstatic --noinput
 
+# Create non-root user for security
+RUN adduser --disabled-password --gecos '' appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
 EXPOSE 8000
 
-CMD ["gunicorn","--bind",":8000","--workers","2","django_project.wsgi"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD python -c "import requests; requests.get('http://localhost:8000/health/', timeout=10)" || exit 1
+
+# Default command
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "300", "django_project.wsgi:application"]

@@ -34,7 +34,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
-      - HUGGINGFACE_FACESWAP_URL=https://mnraynor90-facefusionfastapi.hf.space
+      - HUGGINGFACE_FACESWAP_URL=https://mnraynor90-facefusionfastapi-private.hf.space
     volumes:
       - .:/app
       - static_volume:/app/staticfiles

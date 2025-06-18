@@ -1,0 +1,5005 @@
+# BACKEND CODE SNAPSHOT
+# Generated for AI Face Swap App
+# Total files: 60
+
+
+
+# ==== accounts/models.py ====
+
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
+from django.db import models
+from django.utils import timezone
+from django.contrib.auth.base_user import BaseUserManager
+
+
+class CustomUserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError("The Email field must be set")
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password, **extra_fields):
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        if not extra_fields.get("is_staff") or not extra_fields.get("is_superuser"):
+            raise ValueError("Superuser must have is_staff=True and is_superuser=True.")
+        return self.create_user(email, password, **extra_fields)
+
+
+class CustomUser(AbstractBaseUser, PermissionsMixin):
+    email = models.EmailField(unique=True)
+    first_name = models.CharField(max_length=30, blank=True)
+    last_name = models.CharField(max_length=30, blank=True)
+    is_staff = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    date_joined = models.DateTimeField(default=timezone.now)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = CustomUserManager()
+
+    def __str__(self):
+        return self.email
+
+
+
+
+# ==== accounts/serializers.py ====
+
+from rest_framework import serializers
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+class CustomUserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=True, min_length=8)
+
+    class Meta:
+        model = User
+        fields = ["id", "email", "first_name", "last_name", "password"]
+        read_only_fields = ["id"]
+
+    def create(self, validated_data):
+        user = User.objects.create_user(
+            email=validated_data["email"],
+            password=validated_data["password"],
+            first_name=validated_data.get("first_name", ""),
+            last_name=validated_data.get("last_name", "")
+        )
+        return user
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            if attr == "password":
+                instance.set_password(value)
+            else:
+                setattr(instance, attr, value)
+        instance.save()
+        return instance
+
+
+
+
+# ==== accounts/__init__.py ====
+
+
+
+
+
+# ==== accounts/apps.py ====
+
+from django.apps import AppConfig
+
+
+class AccountsConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'accounts'
+
+
+
+
+# ==== accounts/forms.py ====
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import UserCreationForm, UserChangeForm
+
+class CustomUserCreationForm(UserCreationForm):
+    class Meta:
+        model = get_user_model()
+        fields = ("email",)  # Remove 'username'
+
+class CustomUserChangeForm(UserChangeForm):
+    class Meta:
+        model = get_user_model()
+        fields = ("email",)  # Remove 'username'
+
+
+
+
+# ==== accounts/admin.py ====
+
+from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin
+from .models import CustomUser
+from .forms import CustomUserCreationForm, CustomUserChangeForm
+
+@admin.register(CustomUser)
+class CustomUserAdmin(UserAdmin):
+    add_form = CustomUserCreationForm
+    form = CustomUserChangeForm
+    model = CustomUser
+
+    list_display = ("email", "first_name", "last_name", "is_staff", "is_active")
+    list_filter = ("is_staff", "is_active")
+    ordering = ("email",)
+
+    fieldsets = (
+        (None, {"fields": ("email", "password")}),
+        ("Personal Info", {"fields": ("first_name", "last_name")}),
+        ("Permissions", {"fields": ("is_staff", "is_active", "groups", "user_permissions")}),
+        ("Important dates", {"fields": ("last_login", "date_joined")}),
+    )
+
+    add_fieldsets = (
+        (None, {
+            "classes": ("wide",),
+            "fields": ("email", "password1", "password2", "is_staff", "is_active"),
+        }),
+    )
+
+
+
+
+# ==== accounts/api_auth.py ====
+
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+
+
+class CustomAuthToken(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response({"error": "Email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = authenticate(request, username=email, password=password)
+
+        if not user:
+            return Response({"error": "Invalid credentials."}, status=status.HTTP_400_BAD_REQUEST)
+
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({
+            "token": token.key,
+            "user_id": user.id,
+            "email": user.email,
+        })
+
+
+
+
+# ==== accounts/tests.py ====
+
+from django.test import TestCase
+
+# Create your tests here.
+
+
+
+
+# ==== accounts/urls.py ====
+
+from django.urls import path
+from .views import SignupAPIView, UserProfileAPIView, CustomAuthToken
+
+app_name = "accounts"
+
+urlpatterns = [
+    path("signup/", SignupAPIView.as_view(), name="signup"),
+    path("me/", UserProfileAPIView.as_view(), name="user-profile"),
+    path("login/", CustomAuthToken.as_view(), name="token-login"),
+]
+
+
+
+
+# ==== accounts/views.py ====
+
+from rest_framework import generics, permissions, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate, get_user_model
+
+from .serializers import CustomUserSerializer
+
+User = get_user_model()
+
+
+class SignupAPIView(generics.CreateAPIView):
+    """
+    POST /api/accounts/signup/
+    """
+    queryset = User.objects.all()
+    serializer_class = CustomUserSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class UserProfileAPIView(APIView):
+    """
+    GET, PUT /api/accounts/me/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        serializer = CustomUserSerializer(request.user)
+        return Response(serializer.data)
+
+    def put(self, request):
+        serializer = CustomUserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CustomAuthToken(ObtainAuthToken):
+    """
+    POST /api/accounts/login/
+    Authenticates using email and password.
+    """
+    def post(self, request, *args, **kwargs):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response({"error": "Email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = authenticate(request, email=email, password=password)
+        if not user:
+            return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        token, created = Token.objects.get_or_create(user=user)
+        return Response({"token": token.key})
+
+
+
+
+# ==== accounts/tests/test_placeholder.py ====
+
+
+
+
+
+# ==== accounts/tests/__init__.py ====
+
+
+
+
+
+# ==== chat/knowledge_base.py ====
+
+# chat/knowledge_base.py
+
+KNOWLEDGE_BASE = """
+About Matthew:
+- Matthew Raynor is a C5–C6 quadriplegic living in a nursing home, working toward independent living.
+- He’s a former deep-sea fisherman turned web developer, author, and artist.
+- He offers services including: custom website development, drone photography, and motivational content.
+
+Web Development:
+- Matthew builds full-stack apps using Django, React, PostgreSQL, and Docker.
+- Visit the Portfolio to see his projects and the Store to buy his visual memoir.
+
+Drone Services:
+- Matthew offers custom drone photography and aerial video shoots.
+- Ideal for real estate, landscapes, art installations, and events.
+
+Support:
+- Users can support Matthew by donating to his fundraiser, sharing his story, or helping him find housing and caregiving.
+- Visit the Contact page to get in touch.
+
+Using the Website:
+- Log in or sign up with email or Google.
+- Visit the Store to view and purchase artwork or his book.
+- Use the Contact form for questions or project inquiries.
+- The blog contains reflections, updates, and inspirational writing.
+
+AI Assistant:
+- This assistant can help answer questions about Matthew, his journey, services, store, or how to help.
+"""
+
+
+
+
+# ==== chat/models.py ====
+
+from django.db import models
+
+# Create your models here.
+
+
+
+
+# ==== chat/__init__.py ====
+
+
+
+
+
+# ==== chat/apps.py ====
+
+#chat/apps.py
+from django.apps import AppConfig
+
+
+class ChatConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'chat'
+
+
+
+
+# ==== chat/openai_utils.py ====
+
+from pathlib import Path
+import json
+from django.conf import settings
+from openai import OpenAI
+
+client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+def load_knowledge_base():
+    """
+    Loads all JSON files from chat/data/ into a combined list.
+    Each file should contain either a list or a single dict.
+    """
+    base_path = Path(settings.BASE_DIR) / "chat" / "data"
+    knowledge = []
+
+    for file in base_path.glob("*.json"):
+        try:
+            data = json.load(file.open())
+            if isinstance(data, list):
+                knowledge.extend(data)
+            elif isinstance(data, dict):
+                knowledge.append(data)
+        except Exception as e:
+            print(f"Error loading {file.name}: {e}")
+    return knowledge
+
+def get_openai_response(user_message):
+    """
+    Constructs a system prompt using the loaded knowledge base
+    and sends a user message to OpenAI.
+    """
+    context_blocks = load_knowledge_base()
+    system_content = "You are a helpful assistant on MatthewRaynor.com. Use the following context when answering questions:\n\n"
+
+    for block in context_blocks:
+        title = block.get('title') or 'Untitled'
+        content = block.get('content') or ''
+        system_content += f"- {title}: {content}\n"
+
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_message}
+        ]
+    )
+    return response.choices[0].message.content.strip()
+
+
+
+
+# ==== chat/admin.py ====
+
+from django.contrib import admin
+
+# Register your models here.
+
+
+
+
+# ==== chat/tests.py ====
+
+from django.test import TestCase
+
+# Create your tests here.
+
+
+
+
+# ==== chat/urls.py ====
+
+from django.urls import path
+from .views import ChatAPIView
+
+app_name = "chat"
+
+urlpatterns = [
+    path("ask/", ChatAPIView.as_view(), name="ask"),
+]
+
+
+
+
+# ==== chat/views.py ====
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.conf import settings
+from openai import OpenAI
+from .openai_utils import get_openai_response
+
+client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+
+class ChatAPIView(APIView):
+    """
+    POST /api/chat/ask/
+    Accepts a user message and returns an AI-generated reply using OpenAI.
+    """
+
+    def post(self, request, *args, **kwargs):
+        message = request.data.get("message", "")
+        if not message:
+            return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            reply = get_openai_response(message)
+            return Response({"reply": reply}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+# ==== chat/tests/__init__.py ====
+
+
+
+
+
+# ==== imagegen/models.py ====
+
+from django.db import models
+from django.conf import settings
+from cloudinary_storage.storage import MediaCloudinaryStorage
+
+class GeneratedImage(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_images"
+    )
+    prompt = models.TextField()
+    match_name = models.CharField(max_length=100)
+    selfie = models.ImageField(
+        upload_to="uploads/selfies/",
+        storage=MediaCloudinaryStorage()  # ✅ Explicitly use Cloudinary
+    )
+    output_image = models.ImageField(
+        upload_to="uploads/fused/", 
+        null=True, 
+        blank=True,
+        storage=MediaCloudinaryStorage()  # ✅ Explicitly use Cloudinary
+    )
+    output_url = models.URLField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.match_name} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+
+
+
+# ==== imagegen/hf_utils.py ====
+
+import requests
+
+HF_API_URL = "https://mnraynor90-gradiowapi.hf.space/run/predict"
+
+def facefusion_via_hf(selfie_url, target_url):
+    try:
+        response = requests.post(HF_API_URL, json={
+            "data": [selfie_url, target_url]
+        }, timeout=300)
+
+        if response.status_code != 200:
+            return {"error": f"HF API returned {response.status_code}: {response.text}"}
+
+        data = response.json()
+        if "data" in data and data["data"]:
+            return {"base64": data["data"][0]}
+        return {"error": "Unexpected Hugging Face response format."}
+
+    except Exception as e:
+        return {"error": f"FaceFusion API error: {e}"}
+
+
+
+
+# ==== imagegen/serializers.py ====
+
+from rest_framework import serializers
+from .models import GeneratedImage
+
+class GeneratedImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GeneratedImage
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'user']
+
+
+
+
+# ==== imagegen/face_match.py ====
+
+import face_recognition
+import numpy as np
+import json
+from pathlib import Path
+
+EMBEDDINGS_PATH = Path(__file__).resolve().parent.parent / "face_data" / "embeddings.json"
+
+def match_face(uploaded_image_path):
+    """
+    Match an uploaded face image against historical figures
+    Returns best match with confidence score
+    """
+    try:
+        print(f"🔍 Processing uploaded image: {uploaded_image_path}")
+        
+        # Load the uploaded selfie
+        image = face_recognition.load_image_file(uploaded_image_path)
+        face_locations = face_recognition.face_locations(image)
+        
+        if not face_locations:
+            return {"error": "No face detected in uploaded image."}
+        
+        if len(face_locations) > 1:
+            print(f"⚠️  Multiple faces detected, using the largest one.")
+        
+        # Get encoding for the uploaded face
+        uploaded_encoding = face_recognition.face_encodings(image, known_face_locations=face_locations)[0]
+        print(f"✅ Successfully extracted face encoding from uploaded image")
+        
+    except Exception as e:
+        print(f"❌ Error processing uploaded image: {str(e)}")
+        return {"error": f"Failed to process uploaded image: {e}"}
+
+    # Load historical figure embeddings
+    try:
+        if not EMBEDDINGS_PATH.exists():
+            return {"error": f"Embeddings file not found at {EMBEDDINGS_PATH}. Run embed_cloudinary_faces.py first."}
+            
+        with open(EMBEDDINGS_PATH, "r") as f:
+            known_embeddings = json.load(f)
+            
+        if not known_embeddings:
+            return {"error": "No historical embeddings found. Run embed_cloudinary_faces.py first."}
+            
+        print(f"📚 Loaded {len(known_embeddings)} historical figure embeddings")
+        
+    except Exception as e:
+        print(f"❌ Error loading embeddings: {str(e)}")
+        return {"error": f"Failed to load historical embeddings: {e}"}
+
+    # Compare using cosine similarity
+    def cosine_similarity(a, b):
+        """Calculate cosine similarity between two vectors"""
+        return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+    best_match = None
+    best_score = -1
+    all_scores = []
+
+    print("🎯 Comparing against historical figures...")
+    
+    for entry in known_embeddings:
+        try:
+            name = entry["name"]
+            known_vector = np.array(entry["embedding"])
+            
+            # Calculate similarity score
+            score = cosine_similarity(uploaded_encoding, known_vector)
+            all_scores.append((name, score))
+            
+            print(f"  • {name}: {score:.3f}")
+            
+            if score > best_score:
+                best_score = score
+                best_match = name
+                
+        except Exception as e:
+            print(f"⚠️  Error processing {entry.get('name', 'unknown')}: {str(e)}")
+            continue
+
+    # Sort all scores for debugging
+    all_scores.sort(key=lambda x: x[1], reverse=True)
+    print(f"\n🏆 Top 3 matches:")
+    for i, (name, score) in enumerate(all_scores[:3]):
+        print(f"  {i+1}. {name}: {score:.3f}")
+
+    if best_match and best_score > 0.3:  # Minimum confidence threshold
+        print(f"\n✅ Best match: {best_match} (confidence: {best_score:.3f})")
+        return {
+            "match_name": best_match, 
+            "score": best_score,
+            "all_matches": all_scores[:5]  # Return top 5 for debugging
+        }
+    else:
+        print(f"\n❌ No confident match found (best score: {best_score:.3f})")
+        return {
+            "error": f"No confident match found. Best match was {best_match} with score {best_score:.3f}",
+            "all_matches": all_scores[:5]
+        }
+
+
+
+# ==== imagegen/__init__.py ====
+
+
+
+
+
+# ==== imagegen/apps.py ====
+
+from django.apps import AppConfig
+
+
+class ImagegenConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'imagegen'
+
+
+
+
+# ==== imagegen/admin.py ====
+
+from django.contrib import admin
+from .models import GeneratedImage
+
+@admin.register(GeneratedImage)
+class GeneratedImageAdmin(admin.ModelAdmin):
+    list_display = ('match_name', 'user', 'created_at')
+    readonly_fields = ('created_at',)
+
+
+
+
+# ==== imagegen/tests.py ====
+
+from django.test import TestCase
+
+# Create your tests here.
+
+
+
+
+# ==== imagegen/urls.py ====
+
+from django.urls import path
+from .views import GenerateImageView, ImageStatusView, UnlockImageView, ListGeneratedImagesView
+
+urlpatterns = [
+    path("generate/", GenerateImageView.as_view(), name="generate-image"),
+    path("status/<int:prediction_id>/", ImageStatusView.as_view(), name="image-status"),
+    path("unlock/", UnlockImageView.as_view(), name="unlock-generation"),
+    path("list/", ListGeneratedImagesView.as_view(), name="list-images"),  # New endpoint
+]
+
+
+
+# ==== imagegen/views.py ====
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from .models import GeneratedImage
+from .face_match import match_face
+from faceswap.huggingface_utils import FaceFusionClient
+import tempfile
+import base64
+from django.core.files.base import ContentFile
+import os
+from django.core.files.uploadedfile import InMemoryUploadedFile
+import io
+import time
+import random
+
+# Map historical figures to their Cloudinary URLs
+HISTORICAL_FIGURES = {
+    "Princess Diana": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/princess_diana_ueb9ha.png",
+    "Marilyn Monroe": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/marilyn_monroe_geys6v.png",
+    "Pocahontas": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/Pocahontas_kp0obo.png",
+    "Napoleon": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/napolean_ukozvo.png",
+    "Marie Antoinette": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921363/Marie_Antoinette_fvjtgy.png",
+    "Keith Haring": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/keith_k7b5xw.png",
+    "Malcolm X": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/malcolm_x_a8sluo.png",
+    "Jimi Hendrix": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/jimi_hendrix_u07bvu.png",
+    "Joan of Arc": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/Joan_of_Arc_vvi28l.png",
+    "Leonardo da Vinci": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/leonardo_davinci_lv7gy8.png",
+    "Cleopatra": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921359/cleopatra_zcslcx.png",
+    "Frida Kahlo": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/frida_khalo_wq6qyl.png",
+    "JFK": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/jfk_rznzq0.png",
+    "James Dean": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/james_dean_wvmc5c.png",
+    "Coco Chanel": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/Coco_Chanel_mnx6s9.png",
+    "Elvis Presley": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png",
+    "Che Guevara": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921355/Che_Guevara_n8nmln.png",
+    "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921354/alexander_the_great_mcdwpy.png",
+}
+
+class GenerateImageView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def perform_face_swap_with_retry(self, source_mock, target_mock, match_name, max_retries=4):
+        """
+        Perform face swap with exponential backoff retry logic
+        """
+        fusion_client = FaceFusionClient()
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"🔄 Face swap attempt {attempt + 1}/{max_retries} for {match_name}")
+                result_image_data = fusion_client.swap_faces(source_mock, target_mock)
+                print(f"✅ Face swap succeeded on attempt {attempt + 1}: {len(result_image_data)} bytes")
+                return result_image_data
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                # Check if it's a rate limiting error
+                if any(keyword in error_msg for keyword in [
+                    'slow down', 'too many', 'rate limit', 'concurrent requests',
+                    'quota exceeded', 'throttled', 'busy'
+                ]):
+                    if attempt < max_retries - 1:  # Don't wait on the last attempt
+                        # Exponential backoff with jitter
+                        base_delay = 2 ** attempt  # 1s, 2s, 4s, 8s
+                        jitter = random.uniform(0.5, 1.5)  # Add randomness
+                        delay = base_delay * jitter
+                        
+                        print(f"⏳ Rate limited. Waiting {delay:.1f}s before retry {attempt + 2}...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        print(f"❌ Max retries reached. Final error: {e}")
+                        raise Exception(f"Face swap failed after {max_retries} attempts due to rate limiting. Please try again in a few minutes.")
+                else:
+                    # Non-rate-limiting error, don't retry
+                    print(f"❌ Non-retryable error: {e}")
+                    raise e
+        
+        # Should never reach here, but just in case
+        raise Exception(f"Face swap failed after {max_retries} attempts")
+
+    def post(self, request):
+        selfie = request.FILES.get("selfie")
+        if not selfie:
+            return Response({"error": "Selfie is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Read the file content once and store it
+        selfie_content = selfie.read()
+        
+        # Save uploaded selfie to temporary file for face matching
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            tmp.write(selfie_content)
+            tmp_path = tmp.name
+
+        # Create a new file object for Django model (reset file pointer)
+        selfie_for_model = InMemoryUploadedFile(
+            file=io.BytesIO(selfie_content),
+            field_name=selfie.field_name,
+            name=selfie.name,
+            content_type=selfie.content_type,
+            size=len(selfie_content),
+            charset=selfie.charset,
+        )
+
+        temp_image = None
+        try:
+            # Step 1: Match face with historical figures
+            print("🔍 Starting face matching...")
+            match_result = match_face(tmp_path)
+            if "error" in match_result:
+                return Response(match_result, status=status.HTTP_400_BAD_REQUEST)
+
+            match_name = match_result["match_name"]
+            match_score = match_result.get("score", 0)
+            
+            print(f"🎯 Face match found: {match_name} (score: {match_score:.3f})")
+
+            # Check if we have a historical image for this match
+            historical_image_url = HISTORICAL_FIGURES.get(match_name)
+            if not historical_image_url:
+                return Response({
+                    "error": f"No historical image available for {match_name}. Available figures: {list(HISTORICAL_FIGURES.keys())}"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Step 2: Create database record with the fresh file object
+            temp_image = GeneratedImage.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                prompt=f"You as {match_name}",
+                match_name=match_name,
+                selfie=selfie_for_model,
+                output_url="",
+            )
+
+            print(f"📝 Created GeneratedImage record: {temp_image.id}")
+
+            # Step 3: Create mock image field objects for face swap
+            class MockImageField:
+                def __init__(self, url):
+                    self.url = url
+
+            source_mock = MockImageField(temp_image.selfie.url)  # User's selfie
+            target_mock = MockImageField(historical_image_url)   # Historical figure
+
+            print(f"🔄 Starting face swap: {temp_image.selfie.url} -> {historical_image_url}")
+
+            # Step 4: Perform face swap with retry logic
+            result_image_data = self.perform_face_swap_with_retry(
+                source_mock, target_mock, match_name
+            )
+
+            print(f"✅ Face swap completed: {len(result_image_data)} bytes")
+
+            # Step 5: Save the result
+            temp_image.output_image.save(
+                f"{temp_image.id}_fused_{match_name.replace(' ', '_')}.jpg", 
+                ContentFile(result_image_data)
+            )
+            temp_image.save()
+
+            print(f"💾 Saved result to: {temp_image.output_image.url}")
+
+            return Response({
+                "id": temp_image.id,
+                "match_name": match_name,
+                "match_score": round(match_score, 3),
+                "message": f"Successfully transformed you into {match_name}!",
+                "output_image_url": temp_image.output_image.url,
+                "original_selfie_url": temp_image.selfie.url,
+                "historical_figure_url": historical_image_url
+            })
+
+        except Exception as e:
+            print(f"❌ Error in GenerateImageView: {str(e)}")
+            # Clean up on error
+            if temp_image:
+                try:
+                    temp_image.delete()
+                except:
+                    pass
+            
+            return Response({
+                "error": f"Face processing failed: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+
+
+class ImageStatusView(APIView):
+    """Get status of a generated image"""
+    def get(self, request, prediction_id):
+        try:
+            generated_image = GeneratedImage.objects.get(id=prediction_id)
+            
+            return Response({
+                "id": generated_image.id,
+                "status": "completed" if generated_image.output_image else "processing",
+                "match_name": generated_image.match_name,
+                "prompt": generated_image.prompt,
+                "output_image_url": generated_image.output_image.url if generated_image.output_image else None,
+                "created_at": generated_image.created_at
+            })
+        except GeneratedImage.DoesNotExist:
+            return Response(
+                {"error": "Generated image not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class UnlockImageView(APIView):
+    """Reset generation counter for demo purposes"""
+    def post(self, request):
+        request.session["image_generation_count"] = 0
+        return Response({"message": "Unlock granted. You can generate again."})
+
+
+class ListGeneratedImagesView(APIView):
+    """List all generated images for a user"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        images = GeneratedImage.objects.filter(user=request.user).order_by('-created_at')
+        
+        results = []
+        for img in images:
+            results.append({
+                "id": img.id,
+                "match_name": img.match_name,
+                "prompt": img.prompt,
+                "output_image_url": img.output_image.url if img.output_image else None,
+                "selfie_url": img.selfie.url,
+                "created_at": img.created_at
+            })
+        
+        return Response({"images": results})
+
+
+
+# ==== faceswap/tasks.py ====
+
+
+
+
+
+# ==== faceswap/models.py ====
+
+from django.db import models
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+class FaceSwapJob(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    source_image = models.ImageField(upload_to='faceswap/source/')
+    target_image = models.ImageField(upload_to='faceswap/target/')
+    result_image = models.ImageField(upload_to='faceswap/results/', null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"FaceSwap Job {self.id} - {self.user.email} - {self.status}"
+
+
+
+# ==== faceswap/serializers.py ====
+
+from rest_framework import serializers
+from .models import FaceSwapJob
+
+class FaceSwapJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FaceSwapJob
+        fields = ['id', 'source_image', 'target_image', 'result_image', 
+                 'status', 'error_message', 'created_at', 'completed_at']
+        read_only_fields = ['id', 'result_image', 'status', 'error_message', 
+                           'created_at', 'completed_at']
+
+class FaceSwapCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FaceSwapJob
+        fields = ['source_image', 'target_image']
+
+
+
+# ==== faceswap/__init__.py ====
+
+
+
+
+
+# ==== faceswap/apps.py ====
+
+from django.apps import AppConfig
+
+class FaceswapConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'faceswap'
+
+
+
+# ==== faceswap/admin.py ====
+
+from django.contrib import admin
+from .models import FaceSwapJob
+
+@admin.register(FaceSwapJob)
+class FaceSwapJobAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user', 'status', 'created_at', 'completed_at']
+    list_filter = ['status', 'created_at']
+    search_fields = ['user__email']
+    readonly_fields = ['created_at', 'completed_at']
+    
+    def get_readonly_fields(self, request, obj=None):
+        if obj:  # Editing existing object
+            return self.readonly_fields + ['user', 'source_image', 'target_image']
+        return self.readonly_fields
+
+
+
+# ==== faceswap/huggingface_utils.py ====
+
+import requests
+import time
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+import tempfile
+import os
+import base64
+from gradio_client import Client
+import random
+
+# Your specific Hugging Face Space URL
+HUGGINGFACE_SPACE_URL = getattr(settings, 'HUGGINGFACE_FACESWAP_URL', 
+                               'https://mnraynor90-facefusionfastapi.hf.space')
+
+class FaceFusionClient:
+    def __init__(self):
+        self.base_url = HUGGINGFACE_SPACE_URL
+        
+    def get_image_url(self, image_field):
+        """Convert Django ImageField to accessible URL"""
+        try:
+            if hasattr(image_field, 'url'):
+                image_url = image_field.url
+                
+                # Check if it's already a full URL (like Cloudinary)
+                if image_url.startswith('http'):
+                    print(f"✅ Using full URL: {image_url}")
+                    return image_url
+                
+                # If it's a relative URL and we're using Cloudinary, force Cloudinary URL
+                if image_url.startswith('/') and hasattr(image_field, 'name'):
+                    # Try to get Cloudinary URL directly
+                    try:
+                        import cloudinary.utils
+                        cloudinary_url = cloudinary.utils.cloudinary_url(image_field.name)[0]
+                        print(f"✅ Generated Cloudinary URL: {cloudinary_url}")
+                        return cloudinary_url
+                    except Exception as cloudinary_error:
+                        print(f"⚠️  Cloudinary URL generation failed: {cloudinary_error}")
+                        
+                        # Fallback to local URL (but warn it won't work for HF)
+                        base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
+                        image_url = f"{base_url}{image_url}"
+                        print(f"⚠️  WARNING: Using local URL that may not be accessible from Hugging Face: {image_url}")
+                        print("💡 TIP: Check Cloudinary configuration")
+                        return image_url
+                
+                return image_url
+            else:
+                raise Exception("Invalid image field")
+        except Exception as e:
+            raise Exception(f"Failed to get image URL: {str(e)}")
+    
+    def _single_face_swap_attempt(self, source_url, target_url):
+        """
+        Single attempt at face swapping - extracted for retry logic
+        """
+        # Create a temporary directory for potential downloads
+        download_dir = tempfile.mkdtemp()
+        
+        try:
+            print(f"Creating Gradio client...")
+            
+            # Use the correct endpoint with download_files enabled
+            client = Client(
+                "mnraynor90/facefusionfastapi",
+                download_files=True  # Enable automatic file downloads
+            )
+            
+            print(f"Calling face swap API...")
+            
+            # Call the process_images function
+            result = client.predict(
+                source_url=source_url,
+                target_url=target_url,
+                api_name="/process_images"
+            )
+            
+            print(f"Gradio result: {result}")
+            
+            # Result is tuple of 2 elements: [image_path_or_dict, status_message]
+            if result and len(result) >= 2:
+                result_image = result[0]  # Could be path string or dict
+                status_message = result[1]  # Status message
+                
+                print(f"Status message: {status_message}")
+                print(f"Image result type: {type(result_image)}")
+                print(f"Image result content: {result_image}")
+                
+                # Check for None result
+                if result_image is None:
+                    raise Exception("Gradio returned None for the image result. This usually means the face swap failed on the server.")
+                
+                # Handle both string path and dict formats
+                if isinstance(result_image, str):
+                    # It should now be a local file path due to download_files=True
+                    print(f"Local image path: {result_image}")
+                    
+                    if os.path.exists(result_image):
+                        print(f"File exists! Size: {os.path.getsize(result_image)} bytes")
+                        with open(result_image, 'rb') as f:
+                            image_data = f.read()
+                            print(f"Successfully read {len(image_data)} bytes from local file")
+                            return image_data
+                    else:
+                        # File doesn't exist locally, maybe it's still a remote path
+                        print(f"Local file doesn't exist, trying remote download fallback")
+                        raise Exception(f"Local file not found and remote download failed: {result_image}")
+                
+                elif isinstance(result_image, dict):
+                    # It's a dict with url/path - check if it has a local path first
+                    local_path = result_image.get('path')
+                    image_url = result_image.get('url')
+                    
+                    print(f"Dict result - path: {local_path}, url: {image_url}")
+                    
+                    if local_path and os.path.exists(local_path):
+                        with open(local_path, 'rb') as f:
+                            image_data = f.read()
+                            return image_data
+                    
+                    elif image_url:
+                        # Try downloading from URL as fallback
+                        print(f"Downloading from URL fallback: {image_url}")
+                        img_response = requests.get(image_url)
+                        if img_response.status_code == 200:
+                            return img_response.content
+                        else:
+                            raise Exception(f"Failed to download from URL: {img_response.status_code}")
+                    
+                    else:
+                        raise Exception(f"No valid path or URL in image dict: {result_image}")
+                
+                else:
+                    raise Exception(f"Unexpected image result type: {type(result_image)}")
+            
+            else:
+                raise Exception(f"Unexpected result format: {result}")
+                
+        finally:
+            # Always clean up the temp directory
+            try:
+                import shutil
+                shutil.rmtree(download_dir)
+                print(f"Cleaned up download directory: {download_dir}")
+            except Exception as cleanup_error:
+                print(f"Failed to cleanup download dir: {cleanup_error}")
+        
+    def swap_faces(self, source_image_field, target_image_field, max_retries=4):
+        """
+        Call your Hugging Face Space Gradio API to perform face swapping with retry logic
+        """
+        # Get URLs for the images (works with Cloudinary or local URLs)
+        source_url = self.get_image_url(source_image_field)
+        target_url = self.get_image_url(target_image_field)
+        
+        print(f"Source URL: {source_url}")
+        print(f"Target URL: {target_url}")
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"🔄 Face swap attempt {attempt + 1}/{max_retries}")
+                
+                # Perform the actual face swap
+                result_data = self._single_face_swap_attempt(source_url, target_url)
+                
+                print(f"✅ Face swap succeeded on attempt {attempt + 1}: {len(result_data)} bytes")
+                return result_data
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                print(f"❌ Attempt {attempt + 1} failed: {e}")
+                
+                # Check if it's a rate limiting error that we should retry
+                is_rate_limit_error = any(keyword in error_msg for keyword in [
+                    'slow down', 'too many', 'rate limit', 'concurrent requests',
+                    'quota exceeded', 'throttled', 'busy', 'server is busy',
+                    'connection pool', 'connection timeout', 'timeout'
+                ])
+                
+                if is_rate_limit_error and attempt < max_retries - 1:
+                    # Exponential backoff with jitter for rate limiting
+                    base_delay = 2 ** attempt  # 1s, 2s, 4s, 8s
+                    jitter = random.uniform(0.8, 1.5)  # Add randomness to prevent thundering herd
+                    delay = base_delay * jitter
+                    
+                    print(f"⏳ Rate limit detected. Waiting {delay:.1f}s before retry {attempt + 2}...")
+                    time.sleep(delay)
+                    continue
+                    
+                elif attempt < max_retries - 1:
+                    # For non-rate-limit errors, wait a shorter time
+                    delay = 1.0 + random.uniform(0, 1)
+                    print(f"⏳ Non-rate-limit error. Brief wait {delay:.1f}s before retry {attempt + 2}...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    # Final attempt failed
+                    if is_rate_limit_error:
+                        final_error = f"Face swap failed after {max_retries} attempts due to rate limiting. The HuggingFace Space is currently overloaded. Please try again in a few minutes."
+                    else:
+                        final_error = f"Face swap failed after {max_retries} attempts: {str(e)}"
+                    
+                    print(f"💥 All attempts exhausted: {final_error}")
+                    raise Exception(final_error)
+        
+        # Should never reach here, but just in case
+        raise Exception(f"Face swap failed after {max_retries} attempts")
+
+def process_face_swap(job_id):
+    """
+    Process a face swap job using Hugging Face Space
+    """
+    from .models import FaceSwapJob
+    from django.utils import timezone
+    
+    try:
+        job = FaceSwapJob.objects.get(id=job_id)
+        job.status = 'processing'
+        job.save()
+        
+        # Initialize FaceFusion client
+        client = FaceFusionClient()
+        
+        # Perform face swap using the ImageField objects directly (with retry logic)
+        result_image_data = client.swap_faces(job.source_image, job.target_image)
+        
+        # Save result image
+        result_filename = f"faceswap_result_{job.id}_{int(time.time())}.jpg"
+        result_file = ContentFile(result_image_data, name=result_filename)
+        job.result_image.save(result_filename, result_file)
+        
+        # Update job status
+        job.status = 'completed'
+        job.completed_at = timezone.now()
+        job.save()
+        
+        return True
+        
+    except FaceSwapJob.DoesNotExist:
+        print(f"FaceSwap job {job_id} not found")
+        return False
+    except Exception as e:
+        # Update job with error
+        try:
+            job.status = 'failed'
+            job.error_message = str(e)
+            job.save()
+        except:
+            pass
+        print(f"FaceSwap job {job_id} failed: {str(e)}")
+        return False
+
+
+
+# ==== faceswap/tests.py ====
+
+
+
+
+
+# ==== faceswap/urls.py ====
+
+# Update your faceswap/urls.py to include the test endpoint
+
+from django.urls import path
+from .views import (
+    FaceSwapCreateView,
+    FaceSwapListView, 
+    FaceSwapDetailView,
+    FaceSwapStatusView,
+    FaceSwapTestURLView,
+    DebugGradioAPIView  # Add this import
+)
+
+app_name = "faceswap"
+
+urlpatterns = [
+    path("create/", FaceSwapCreateView.as_view(), name="create"),
+    path("jobs/", FaceSwapListView.as_view(), name="list"),
+    path("jobs/<int:pk>/", FaceSwapDetailView.as_view(), name="detail"),
+    path("status/<int:job_id>/", FaceSwapStatusView.as_view(), name="status"),
+    path("test-url/", FaceSwapTestURLView.as_view(), name="test-url"),
+    path("debug/", DebugGradioAPIView.as_view(), name="debug"),  # Add this line
+]
+
+
+
+# ==== faceswap/views.py ====
+
+from rest_framework import generics, status
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from django.shortcuts import get_object_or_404
+from .models import FaceSwapJob
+from .serializers import FaceSwapJobSerializer, FaceSwapCreateSerializer
+from .huggingface_utils import process_face_swap
+import threading
+
+class FaceSwapCreateView(generics.CreateAPIView):
+    """
+    POST /api/faceswap/create/
+    Upload source and target images to start face swapping
+    """
+    serializer_class = FaceSwapCreateSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Create job with current user
+        job = serializer.save(user=request.user)
+        
+        # Start processing in background thread (or use Celery if available)
+        def process_in_background():
+            process_face_swap(job.id)
+        
+        thread = threading.Thread(target=process_in_background)
+        thread.daemon = True
+        thread.start()
+        
+        # Return job details
+        response_serializer = FaceSwapJobSerializer(job)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+class FaceSwapListView(generics.ListAPIView):
+    """
+    GET /api/faceswap/jobs/
+    List all face swap jobs for the current user
+    """
+    serializer_class = FaceSwapJobSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return FaceSwapJob.objects.filter(user=self.request.user)
+
+class FaceSwapDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/faceswap/jobs/{id}/
+    Get details of a specific face swap job
+    """
+    serializer_class = FaceSwapJobSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return FaceSwapJob.objects.filter(user=self.request.user)
+
+class FaceSwapStatusView(APIView):
+    """
+    GET /api/faceswap/status/{id}/
+    Quick status check for a face swap job
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, job_id):
+        job = get_object_or_404(FaceSwapJob, id=job_id, user=request.user)
+        return Response({
+            'id': job.id,
+            'status': job.status,
+            'error_message': job.error_message,
+            'result_image': job.result_image.url if job.result_image else None,
+            'created_at': job.created_at,
+            'completed_at': job.completed_at
+        })
+    
+# Add this to your existing faceswap/views.py file
+
+class FaceSwapTestURLView(APIView):
+    """
+    POST /api/faceswap/test-url/
+    Test face swapping with direct URLs (for testing with Cloudinary)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        source_url = request.data.get('source_url')
+        target_url = request.data.get('target_url')
+        
+        if not source_url or not target_url:
+            return Response({
+                'error': 'Both source_url and target_url are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            from .huggingface_utils import FaceFusionClient
+            client = FaceFusionClient()
+            
+            # Create a simple mock object with url property
+            class MockImageField:
+                def __init__(self, url):
+                    self.url = url
+            
+            source_mock = MockImageField(source_url)
+            target_mock = MockImageField(target_url)
+            
+            # Test the face swap
+            result_data = client.swap_faces(source_mock, target_mock)
+            
+            # Return base64 encoded result for testing
+            import base64
+            result_b64 = base64.b64encode(result_data).decode('utf-8')
+            
+            return Response({
+                'status': 'success',
+                'message': 'Face swap completed successfully',
+                'result_size': len(result_data),
+                'result_preview': f"data:image/jpeg;base64,{result_b64[:100]}..."  # First 100 chars
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': f'Face swap failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+# Add this debug view to your faceswap/views.py
+
+class DebugGradioAPIView(APIView):
+    """
+    Debug endpoint to test Gradio Space connectivity
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            from .huggingface_utils import HUGGINGFACE_SPACE_URL
+            import requests
+            
+            results = {}
+            
+            # Test 1: Check if the space is running
+            try:
+                response = requests.get(HUGGINGFACE_SPACE_URL, timeout=10)
+                results['space_status'] = f"HTTP {response.status_code}"
+                results['space_accessible'] = response.status_code == 200
+            except Exception as e:
+                results['space_status'] = f"Error: {str(e)}"
+                results['space_accessible'] = False
+            
+            # Test 2: Try to get API info using gradio_client
+            try:
+                from gradio_client import Client
+                client = Client(HUGGINGFACE_SPACE_URL)
+                api_info = client.view_api(all_endpoints=True)
+                results['gradio_client_success'] = True
+                results['api_info'] = str(api_info)
+            except Exception as e:
+                results['gradio_client_success'] = False
+                results['gradio_client_error'] = str(e)
+            
+            # Test 3: Try common Gradio endpoints
+            endpoints_to_test = [
+                '/api/predict',
+                '/run/predict', 
+                '/predict',
+                '/api',
+                '/info',
+                '/app_info'
+            ]
+            
+            results['endpoint_tests'] = {}
+            for endpoint in endpoints_to_test:
+                try:
+                    url = f"{HUGGINGFACE_SPACE_URL}{endpoint}"
+                    response = requests.get(url, timeout=5)
+                    results['endpoint_tests'][endpoint] = {
+                        'status': response.status_code,
+                        'content_type': response.headers.get('content-type', 'unknown'),
+                        'content_preview': response.text[:200] if response.text else 'No content'
+                    }
+                except Exception as e:
+                    results['endpoint_tests'][endpoint] = {
+                        'error': str(e)
+                    }
+            
+            # Test 4: Check if it's a Gradio 4 or 5 app
+            try:
+                response = requests.get(f"{HUGGINGFACE_SPACE_URL}/info", timeout=5)
+                if response.status_code == 200:
+                    results['gradio_info'] = response.json()
+            except:
+                pass
+                
+            return Response({
+                'space_url': HUGGINGFACE_SPACE_URL,
+                'debug_results': results
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': f'Debug failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+# ==== django_project/asgi.py ====
+
+"""
+ASGI config for django_project project.
+
+It exposes the ASGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
+"""
+
+import os
+
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.prod')
+
+application = get_asgi_application()
+
+
+
+
+# ==== django_project/__init__.py ====
+
+
+
+
+
+# ==== django_project/urls.py ====
+
+from django.contrib import admin
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+from django.http import JsonResponse
+
+def api_root(request):
+    return JsonResponse({"message": "API is running!"})
+
+def health_check(request):
+    return JsonResponse({"status": "healthy"})
+
+urlpatterns = [
+    path("", api_root),
+    path("health/", health_check, name="health-check"),  # Add this line
+    path("admin/", admin.site.urls),
+    path("api/accounts/", include(("accounts.urls", "accounts"), namespace="accounts")),
+    path("api/chat/", include(("chat.urls", "chat"), namespace="chat")),
+    path("api/imagegen/", include("imagegen.urls")),
+    path("api/faceswap/", include(("faceswap.urls", "faceswap"), namespace="faceswap")),
+]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+
+
+
+# ==== django_project/wsgi.py ====
+
+"""
+WSGI config for django_project project.
+
+It exposes the WSGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.1/howto/deployment/wsgi/
+"""
+
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.prod')
+
+application = get_wsgi_application()
+
+
+
+
+# ==== django_project/settings/__init__.py ====
+
+
+
+
+
+# ==== django_project/settings/test.py ====
+
+from .base import *
+
+DEBUG = False
+SECRET_KEY = "test-secret-key"
+
+STRIPE_PUBLISHABLE_KEY = "pk_test_dummy"
+STRIPE_SECRET_KEY = "sk_test_dummy"
+STRIPE_WEBHOOK_SECRET = "whsec_dummy"
+stripe.api_key = STRIPE_SECRET_KEY
+
+
+
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+EMAIL_HOST = "localhost"
+EMAIL_PORT = 1025
+EMAIL_USE_TLS = False
+EMAIL_HOST_USER = ""
+EMAIL_HOST_PASSWORD = ""
+DEFAULT_FROM_EMAIL = "test@example.com"
+
+
+# In-memory test DB
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "test.sqlite3",
+    }
+}
+
+RECAPTCHA_PUBLIC_KEY = "test"
+RECAPTCHA_PRIVATE_KEY = "test"
+
+# 👇 Google SSO override here only for tests
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': ['profile', 'email'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+        'OAUTH_PKCE_ENABLED': True,
+        'APP': {
+            'client_id': 'test-client-id',
+            'secret': 'test-secret',
+            'key': ''
+        }
+    }
+}
+
+SECURE_SSL_REDIRECT = False
+SECURE_HSTS_SECONDS = 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
+
+
+
+# ==== django_project/settings/dev.py ====
+
+# backend/django_project/settings/dev.py
+from .base import *
+
+DEBUG = True
+
+# Database for local development
+DATABASES = {
+    "default": env.db_url("DATABASE_URL", default="postgresql://postgres:postgres_password@db:5432/faceswap_db")
+}
+
+# Add localhost to allowed hosts
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[
+    "localhost", "127.0.0.1", "0.0.0.0", "backend"
+])
+
+# CORS settings for local development
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Vite dev server
+    "http://127.0.0.1:5173",
+]
+
+
+
+# ==== django_project/settings/prod.py ====
+
+from .base import *
+import dj_database_url
+import os
+
+DEBUG = False
+
+# Security settings for production
+SECURE_SSL_REDIRECT = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
+# Static files for production
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Database - use Fly.io Postgres
+DATABASES = {
+    'default': dj_database_url.parse(env('DATABASE_URL'))
+}
+
+# Allowed hosts - update with your Fly.io app name
+ALLOWED_HOSTS = [
+    'ai-face-swap-app.fly.dev',
+    'localhost',
+    '127.0.0.1',
+]
+
+# CORS settings for your frontend
+CORS_ALLOWED_ORIGINS = [
+    "https://your-frontend-app.netlify.app",  # Will update after frontend deployment
+    "https://ai-face-swap-app.fly.dev",
+]
+
+# Add health check URL
+from django.urls import path, include
+from django.http import JsonResponse
+
+def health_check(request):
+    return JsonResponse({"status": "healthy"})
+
+# Add to your main urls.py
+# path('health/', health_check, name='health-check'),
+
+# Logging for production
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+
+
+# ==== django_project/settings/base.py ====
+
+from environ import Env
+from pathlib import Path
+import stripe
+import os
+from django.core.management.utils import get_random_secret_key
+
+print("💥 settings.py loaded from latest build")
+
+# Cloudinary Configuration
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+
+# Initialize environment variables
+env = Env()
+
+# For build time, provide defaults for all required env vars
+cloudinary_url = env('CLOUDINARY_URL', default='')
+if cloudinary_url:
+    # Parse the cloudinary://api_key:api_secret@cloud_name format
+    import re
+    match = re.match(r'cloudinary://(\d+):([^@]+)@(.+)', cloudinary_url)
+    if match:
+        api_key, api_secret, cloud_name = match.groups()
+        CLOUDINARY_STORAGE = {
+            'CLOUD_NAME': cloud_name,
+            'API_KEY': api_key,
+            'API_SECRET': api_secret,
+        }
+        print(f"✅ Cloudinary configured from CLOUDINARY_URL for cloud: {cloud_name}")
+    else:
+        print("⚠️  Invalid CLOUDINARY_URL format, using fallback")
+        CLOUDINARY_STORAGE = {
+            'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME', default='dddye9wli'),
+            'API_KEY': env('CLOUDINARY_API_KEY', default='dummy'),
+            'API_SECRET': env('CLOUDINARY_API_SECRET', default='dummy'),
+        }
+else:
+    # Fallback to individual environment variables
+    CLOUDINARY_STORAGE = {
+        'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME', default='dddye9wli'),
+        'API_KEY': env('CLOUDINARY_API_KEY', default='dummy'),
+        'API_SECRET': env('CLOUDINARY_API_SECRET', default='dummy'),
+    }
+    print("⚠️  Using individual Cloudinary env vars")
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_STORAGE['CLOUD_NAME'],
+    api_key=CLOUDINARY_STORAGE['API_KEY'],
+    api_secret=CLOUDINARY_STORAGE['API_SECRET'],
+    secure=True
+)
+
+# Stripe
+STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY', default='pk_test_dummy')
+STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY', default='sk_test_dummy')
+STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET', default='whsec_dummy')
+stripe.api_key = STRIPE_SECRET_KEY
+
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="dummy")
+
+# Base directory
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Security - use Django's built-in secret key generator for build time
+SECRET_KEY = env("DJANGO_SECRET_KEY", default=get_random_secret_key())
+DEBUG = env.bool("DJANGO_DEBUG", default=False)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Hosts
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[
+    "localhost", "127.0.0.1", "0.0.0.0", "web", "*.fly.dev"
+])
+
+# Installed apps
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',  # ✅ This is required for collectstatic
+    'cloudinary_storage',
+    'cloudinary',
+
+    # Custom apps
+    'accounts.apps.AccountsConfig',
+    'chat.apps.ChatConfig',
+    'faceswap.apps.FaceswapConfig',
+
+    # Third-party
+    'django.contrib.sites',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
+
+    'imagegen',
+    'corsheaders',
+
+    'rest_framework',
+    'rest_framework.authtoken', 
+]
+
+# Middleware
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'django_project.urls'
+
+# Templates
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR.parent / 'templates'],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'django_project.wsgi.application'
+
+# Database - provide default for build time
+DATABASES = {
+    "default": env.db_url("DATABASE_URL", default="sqlite:///tmp/build.db")
+}
+
+# Auth
+AUTH_USER_MODEL = 'accounts.CustomUser'
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+# Allauth
+SITE_ID = env.int("DJANGO_SITE_ID", default=1)
+ACCOUNT_AUTHENTICATION_METHOD = 'email'
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_USER_MODEL_USERNAME_FIELD = "email"
+ACCOUNT_EMAIL_VERIFICATION = 'optional'
+ACCOUNT_SIGNUP_REDIRECT_URL = '/dashboard/'
+LOGIN_REDIRECT_URL = '/accounts/dashboard/'
+LOGOUT_REDIRECT_URL = '/'
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': ['profile', 'email'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+        'OAUTH_PKCE_ENABLED': True,
+        'APP': {
+            'client_id': env('GOOGLE_CLIENT_ID', default='test-client-id'),
+            'secret': env('GOOGLE_CLIENT_SECRET', default='test-secret'),
+            'key': ''
+        }
+    }
+}
+
+# Password validation
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+# Localization
+LANGUAGE_CODE = 'en-us'
+TIME_ZONE = 'UTC'
+USE_I18N = True
+USE_TZ = True
+
+# Static files - properly configured for collectstatic
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [BASE_DIR.parent / "static"] if (BASE_DIR.parent / "static").exists() else []
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Media
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+
+# Staticfiles finders
+STATICFILES_FINDERS = [
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+]
+
+# Email
+EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.locmem.EmailBackend")
+EMAIL_HOST = env("EMAIL_HOST", default="smtp.test.com")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="test@test.com")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="testpassword")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@test.com")
+
+# Security
+if not DEBUG:
+    SECURE_SSL_REDIRECT = env.bool("DJANGO_SECURE_SSL_REDIRECT", default=True)
+    SECURE_HSTS_SECONDS = env.int("DJANGO_SECURE_HSTS_SECONDS", default=2592000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
+    SECURE_HSTS_PRELOAD = env.bool("DJANGO_SECURE_HSTS_PRELOAD", default=True)
+    SESSION_COOKIE_SECURE = env.bool("DJANGO_SESSION_COOKIE_SECURE", default=True)
+    CSRF_COOKIE_SECURE = env.bool("DJANGO_CSRF_COOKIE_SECURE", default=True)
+else:
+    SECURE_SSL_REDIRECT = False
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+
+# Other
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ]
+}
+
+HUGGINGFACE_FACESWAP_URL = env('HUGGINGFACE_FACESWAP_URL', 
+    default='https://mnraynor90-facefusionfastapi.hf.space')
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Vite dev server
+    "http://127.0.0.1:5173",
+    "https://*.netlify.app",  # Will be updated with actual Netlify URL
+    "https://*.fly.dev",      # Allow all fly.dev subdomains
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+
+
+# ==== scripts/export_code_snapshot.py ====
+
+import os
+
+# Directories to include for backend
+INCLUDE_DIRS = [
+    "accounts", 
+    "chat", 
+    "imagegen", 
+    "faceswap",  # Added missing faceswap app
+    "django_project", 
+    "scripts",
+    "face_data"  # Added face embeddings data
+]
+
+# File extensions to include
+INCLUDE_EXTENSIONS = [
+    ".py", ".json", ".html", ".js", ".ts", ".css", 
+    ".txt", ".md", ".yml", ".yaml", ".toml", ".env.template"  # Added config files
+]
+
+# Directories to exclude
+EXCLUDE_DIRS = {
+    "__pycache__", "migrations", "venv", "env", "node_modules", 
+    "media", "static", ".git", "staticfiles", "uploads"
+}
+
+# Files to exclude
+EXCLUDE_FILES = {
+    ".env", ".env.local", ".env.production", "db.sqlite3", 
+    "*.log", "*.pyc", ".DS_Store"
+}
+
+# Output file
+OUTPUT_PATH = os.path.join("scripts", "backend_code_snapshot.txt")
+
+def should_include(file_path, filename):
+    """Check if file should be included"""
+    if filename in EXCLUDE_FILES or filename.startswith('.'):
+        return False
+    return any(file_path.endswith(ext) for ext in INCLUDE_EXTENSIONS)
+
+def walk_and_collect():
+    collected = []
+
+    for base_dir in INCLUDE_DIRS:
+        if not os.path.exists(base_dir):
+            print(f"⚠️  Directory {base_dir} does not exist, skipping...")
+            continue
+            
+        for root, dirs, files in os.walk(base_dir):
+            # Filter out excluded directories
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            
+            for file in files:
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path)
+                
+                if should_include(full_path, file):
+                    try:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                        collected.append((rel_path, content))
+                    except Exception as e:
+                        print(f"❌ Error reading {rel_path}: {e}")
+
+    # Also include root-level config files
+    root_files = [
+        "requirements.txt", "requirements-dev.txt", "manage.py", 
+        "Dockerfile", "docker-compose.yml", "fly.toml"
+    ]
+    
+    for file in root_files:
+        if os.path.exists(file):
+            try:
+                with open(file, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                collected.append((file, content))
+            except Exception as e:
+                print(f"❌ Error reading {file}: {e}")
+
+    return collected
+
+def write_snapshot(files):
+    # Ensure scripts directory exists
+    os.makedirs("scripts", exist_ok=True)
+    
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as out:
+        out.write("# BACKEND CODE SNAPSHOT\n")
+        out.write("# Generated for AI Face Swap App\n")
+        out.write(f"# Total files: {len(files)}\n\n")
+        
+        for path, code in files:
+            out.write(f"\n\n# ==== {path} ====\n\n")
+            out.write(code)
+            out.write("\n\n")
+
+def main():
+    print("🚀 Starting backend code snapshot generation...")
+    print(f"📁 Output file: {OUTPUT_PATH}")
+    
+    collected_files = walk_and_collect()
+    
+    if not collected_files:
+        print("⚠️  No backend files found!")
+        return
+    
+    write_snapshot(collected_files)
+    
+    print(f"✅ Backend snapshot created: {OUTPUT_PATH}")
+    print(f"📊 Files included: {len(collected_files)}")
+    
+    # Print summary
+    file_types = {}
+    for path, _ in collected_files:
+        ext = os.path.splitext(path)[1] or "no extension"
+        file_types[ext] = file_types.get(ext, 0) + 1
+    
+    print("\n📋 File types included:")
+    for ext, count in sorted(file_types.items()):
+        print(f"  • {ext}: {count} files")
+
+if __name__ == "__main__":
+    main()
+
+
+
+# ==== scripts/embed_cloudinary_faces.py ====
+
+import face_recognition
+import os
+import json
+import requests
+import tempfile
+from pathlib import Path
+
+# Django setup
+import sys
+import django
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.dev')
+django.setup()
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+output_file = BASE_DIR / "face_data" / "embeddings.json"
+
+# Your Cloudinary URLs mapped to clean names
+HISTORICAL_FIGURES = {
+    "Princess Diana": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/princess_diana_ueb9ha.png",
+    "Marilyn Monroe": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/marilyn_monroe_geys6v.png",
+    "Pocahontas": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/Pocahontas_kp0obo.png",
+    "Napoleon": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/napolean_ukozvo.png",
+    "Marie Antoinette": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921363/Marie_Antoinette_fvjtgy.png",
+    "Keith Haring": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/keith_k7b5xw.png",
+    "Malcolm X": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/malcolm_x_a8sluo.png",
+    "Jimi Hendrix": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/jimi_hendrix_u07bvu.png",
+    "Joan of Arc": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/Joan_of_Arc_vvi28l.png",
+    "Leonardo da Vinci": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/leonardo_davinci_lv7gy8.png",
+    "Cleopatra": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921359/cleopatra_zcslcx.png",
+    "Frida Kahlo": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/frida_khalo_wq6qyl.png",
+    "JFK": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/jfk_rznzq0.png",
+    "James Dean": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/james_dean_wvmc5c.png",
+    "Coco Chanel": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/Coco_Chanel_mnx6s9.png",
+    "Elvis Presley": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png",
+    "Che Guevara": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921355/Che_Guevara_n8nmln.png",
+    "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921354/alexander_the_great_mcdwpy.png",
+}
+
+def download_and_encode_face(name, url):
+    """Download image from URL and extract face encoding"""
+    try:
+        print(f"📥 Processing {name}...")
+        
+        # Download image to temporary file
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+            tmp_file.write(response.content)
+            tmp_path = tmp_file.name
+        
+        try:
+            # Load and process with face_recognition
+            image = face_recognition.load_image_file(tmp_path)
+            face_locations = face_recognition.face_locations(image)
+            
+            if not face_locations:
+                print(f"❌ No face found in {name}, skipping.")
+                return None
+            
+            if len(face_locations) > 1:
+                print(f"⚠️  Multiple faces found in {name}, using the first one.")
+            
+            # Get face encoding
+            encoding = face_recognition.face_encodings(image, known_face_locations=face_locations)[0]
+            
+            print(f"✅ Successfully encoded {name}")
+            return {
+                "name": name,
+                "embedding": encoding.tolist(),
+                "url": url
+            }
+            
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+                
+    except Exception as e:
+        print(f"❌ Error processing {name}: {str(e)}")
+        return None
+
+def main():
+    print("🚀 Starting face embedding generation from Cloudinary...")
+    print(f"📁 Output file: {output_file}")
+    
+    # Ensure output directory exists
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    embeddings = []
+    
+    for name, url in HISTORICAL_FIGURES.items():
+        result = download_and_encode_face(name, url)
+        if result:
+            embeddings.append(result)
+        print()  # Add blank line for readability
+    
+    # Save to JSON
+    try:
+        with open(output_file, "w") as f:
+            json.dump(embeddings, f, indent=2)
+        
+        print(f"🎉 SUCCESS! Saved {len(embeddings)} embeddings to {output_file}")
+        print(f"📊 Successfully processed: {len(embeddings)}/{len(HISTORICAL_FIGURES)} figures")
+        
+        # Print summary
+        print("\n📋 Generated embeddings for:")
+        for embedding in embeddings:
+            print(f"  • {embedding['name']}")
+            
+    except Exception as e:
+        print(f"❌ Error saving embeddings: {str(e)}")
+
+if __name__ == "__main__":
+    main()
+
+
+
+# ==== face_data/embeddings.json ====
+
+[
+  {
+    "name": "Princess Diana",
+    "embedding": [
+      -0.12040383368730545,
+      0.04097221791744232,
+      0.047720249742269516,
+      -0.10542850196361542,
+      -0.21375347673892975,
+      -0.024675356224179268,
+      0.02763705514371395,
+      -0.06367029249668121,
+      0.18479113280773163,
+      -0.06053265556693077,
+      0.17276126146316528,
+      0.01596507616341114,
+      -0.20276780426502228,
+      0.004284129943698645,
+      -0.04530640318989754,
+      0.15868346393108368,
+      -0.15606223046779633,
+      -0.14298991858959198,
+      -0.13963006436824799,
+      -0.1207565888762474,
+      -0.027592215687036514,
+      0.021190986037254333,
+      -0.04212367907166481,
+      0.007982240989804268,
+      -0.20218811929225922,
+      -0.20744891464710236,
+      -0.03618292883038521,
+      -0.00813966616988182,
+      0.09300417453050613,
+      -0.03975478559732437,
+      0.015028455294668674,
+      0.18580429255962372,
+      -0.1545681208372116,
+      -0.0010173023911193013,
+      0.09034867584705353,
+      0.06794694811105728,
+      -0.07706642150878906,
+      -0.10636475682258606,
+      0.24188123643398285,
+      -0.04744761437177658,
+      -0.1967928558588028,
+      0.04841180890798569,
+      0.09412606805562973,
+      0.17428773641586304,
+      0.27222880721092224,
+      -0.058169081807136536,
+      0.048302847892045975,
+      -0.09205544739961624,
+      0.11471237242221832,
+      -0.3376360833644867,
+      -0.012361057102680206,
+      0.19174236059188843,
+      0.08671874552965164,
+      0.03666572645306587,
+      0.05030626803636551,
+      -0.15664082765579224,
+      -0.04249679669737816,
+      0.21447227895259857,
+      -0.21567033231258392,
+      0.014109783805906773,
+      0.014283604919910431,
+      -0.17128707468509674,
+      -0.12473995983600616,
+      -0.10955987870693207,
+      0.17764919996261597,
+      0.15671567618846893,
+      -0.17038141191005707,
+      -0.19993656873703003,
+      0.2141275256872177,
+      -0.15022198855876923,
+      -0.04411030933260918,
+      0.14406505227088928,
+      -0.07094664126634598,
+      -0.15919463336467743,
+      -0.22383879125118256,
+      0.028222672641277313,
+      0.4200557768344879,
+      0.18615812063217163,
+      -0.1787901669740677,
+      0.05921328067779541,
+      -0.14519377052783966,
+      -0.024044321849942207,
+      -0.023128444328904152,
+      0.04043053835630417,
+      -0.06854189187288284,
+      -0.17608273029327393,
+      -0.10491439700126648,
+      0.0005299831391312182,
+      0.2168583869934082,
+      -0.030343614518642426,
+      -0.008085357025265694,
+      0.1936839073896408,
+      0.10673664510250092,
+      -0.027544451877474785,
+      -0.08747567236423492,
+      0.06139664351940155,
+      -0.15525415539741516,
+      -0.06713984906673431,
+      -0.05906191095709801,
+      -0.10704728960990906,
+      0.048344504088163376,
+      0.0007296790718100965,
+      0.041853487491607666,
+      0.18031752109527588,
+      -0.14100909233093262,
+      0.23245057463645935,
+      -0.06586748361587524,
+      -0.008785068057477474,
+      -0.00676063122227788,
+      -0.08907604962587357,
+      0.06899283826351166,
+      0.03065735474228859,
+      0.10111314803361893,
+      -0.2845029830932617,
+      0.16192014515399933,
+      0.09818597882986069,
+      -0.044974446296691895,
+      0.1552526354789734,
+      0.06473205983638763,
+      0.0397183783352375,
+      0.017291704192757607,
+      -0.026918916031718254,
+      -0.11772838979959488,
+      -0.10645969212055206,
+      0.02277863584458828,
+      -0.08509822934865952,
+      0.0798017829656601,
+      0.040858715772628784
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/princess_diana_ueb9ha.png"
+  },
+  {
+    "name": "Marilyn Monroe",
+    "embedding": [
+      -0.06968211382627487,
+      0.009537594392895699,
+      0.12247055023908615,
+      -0.07366706430912018,
+      -0.021701941266655922,
+      -0.010324282571673393,
+      -0.005286016501486301,
+      -0.14890585839748383,
+      0.16918793320655823,
+      -0.12761488556861877,
+      0.19774426519870758,
+      -0.15377141535282135,
+      -0.32036057114601135,
+      -0.05219080299139023,
+      -0.0809936374425888,
+      0.20340010523796082,
+      -0.13434448838233948,
+      -0.1983344852924347,
+      -0.07589405030012131,
+      -0.09022631496191025,
+      -0.01567038521170616,
+      0.10926451534032822,
+      -0.030074292793869972,
+      0.015708131715655327,
+      -0.10971152037382126,
+      -0.2552211582660675,
+      -0.01216732058674097,
+      -0.024088270962238312,
+      -0.03120565414428711,
+      -0.07577789574861526,
+      0.01628047600388527,
+      0.2129078060388565,
+      -0.18493594229221344,
+      0.0257791168987751,
+      0.006315998267382383,
+      0.18477556109428406,
+      -0.020771590992808342,
+      -0.13137495517730713,
+      0.1414826512336731,
+      -0.008351012133061886,
+      -0.2014787197113037,
+      -0.013860429637134075,
+      0.11965704709291458,
+      0.2697283923625946,
+      0.250807523727417,
+      -0.052333150058984756,
+      -0.079261913895607,
+      -0.10275015234947205,
+      0.09572909772396088,
+      -0.3686048984527588,
+      -0.0854564756155014,
+      0.23354850709438324,
+      0.10473491251468658,
+      0.09932366013526917,
+      0.04805951192975044,
+      -0.13997231423854828,
+      0.027239425107836723,
+      0.1132812574505806,
+      -0.22405017912387848,
+      0.0360080748796463,
+      0.001446062233299017,
+      -0.050063230097293854,
+      0.10089606791734695,
+      -0.07733681797981262,
+      0.1854572743177414,
+      0.014780372381210327,
+      -0.173245370388031,
+      -0.05766028165817261,
+      0.13278914988040924,
+      -0.18170997500419617,
+      -0.07697276771068573,
+      0.13044965267181396,
+      -0.17723599076271057,
+      -0.22975890338420868,
+      -0.3631862699985504,
+      -0.03346594423055649,
+      0.30946075916290283,
+      0.11409259587526321,
+      -0.09021531790494919,
+      0.09652519226074219,
+      -0.07398726046085358,
+      -0.04380086436867714,
+      -0.04415281489491463,
+      0.09709691256284714,
+      0.011268967762589455,
+      -0.07221513241529465,
+      -0.104288749396801,
+      0.037891749292612076,
+      0.2587493658065796,
+      -0.06098031997680664,
+      -0.023410461843013763,
+      0.27275413274765015,
+      -0.03827693313360214,
+      -0.0690605640411377,
+      -0.10321112722158432,
+      0.11876653879880905,
+      -0.05675779655575752,
+      -0.020109830424189568,
+      -0.13513825833797455,
+      -0.07138782739639282,
+      -0.015896882861852646,
+      -0.03237015753984451,
+      0.03381231054663658,
+      0.17573432624340057,
+      -0.21052974462509155,
+      0.13209125399589539,
+      -0.007324655074626207,
+      -0.0077214110642671585,
+      0.03479120880365372,
+      -0.05798518285155296,
+      -0.004553727339953184,
+      0.00389685551635921,
+      0.17713351547718048,
+      -0.271284818649292,
+      0.12867017090320587,
+      0.1946658343076706,
+      0.05206168070435524,
+      0.08577471226453781,
+      0.008607459254562855,
+      0.05302613228559494,
+      -0.026904674246907234,
+      -0.06971220672130585,
+      -0.10191424190998077,
+      -0.09666629135608673,
+      -0.015817059203982353,
+      0.0188871119171381,
+      0.0034770797938108444,
+      0.09316658973693848
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/marilyn_monroe_geys6v.png"
+  },
+  {
+    "name": "Pocahontas",
+    "embedding": [
+      -0.11613370478153229,
+      0.150155171751976,
+      0.07024648040533066,
+      -0.04366655647754669,
+      -0.08111683279275894,
+      -0.0555797815322876,
+      -0.0650460422039032,
+      -0.13076148927211761,
+      0.2755429744720459,
+      -0.12142705917358398,
+      0.18188807368278503,
+      0.037246234714984894,
+      -0.15363526344299316,
+      -0.057584695518016815,
+      -0.11192459613084793,
+      0.17799244821071625,
+      -0.2237386554479599,
+      -0.2201833426952362,
+      -0.020358674228191376,
+      0.01872018724679947,
+      0.1237974464893341,
+      -0.027816081419587135,
+      -0.013126535341143608,
+      0.07342538237571716,
+      -0.1261579394340515,
+      -0.34318768978118896,
+      -0.09737616777420044,
+      -0.0640249252319336,
+      -0.03724115714430809,
+      -0.07788653671741486,
+      -0.0286199189722538,
+      0.005438425578176975,
+      -0.26484543085098267,
+      -0.10366696119308472,
+      -0.023815885186195374,
+      0.11017856746912003,
+      -0.0010933339362964034,
+      -0.07297362387180328,
+      0.13241857290267944,
+      0.02324831113219261,
+      -0.3033091127872467,
+      0.024616921320557594,
+      0.11216995865106583,
+      0.24695128202438354,
+      0.20291826128959656,
+      0.05576052889227867,
+      -0.033307261765003204,
+      -0.1784386932849884,
+      0.1150825172662735,
+      -0.2165619283914566,
+      0.0061008622869849205,
+      0.1990879774093628,
+      0.05986161530017853,
+      0.09540451318025589,
+      0.009007242508232594,
+      -0.11605652421712875,
+      0.0834345892071724,
+      -0.0008352366276085377,
+      -0.19474990665912628,
+      -0.03324924409389496,
+      0.10992768406867981,
+      -0.08689641952514648,
+      -0.037422697991132736,
+      -0.08327234536409378,
+      0.2109232246875763,
+      0.09507566690444946,
+      -0.08851471543312073,
+      -0.2122834026813507,
+      0.11496645212173462,
+      -0.22705186903476715,
+      -0.14251397550106049,
+      0.06282205134630203,
+      -0.05984827131032944,
+      -0.20763875544071198,
+      -0.3470372259616852,
+      -0.015185095369815826,
+      0.4033508896827698,
+      0.15738312900066376,
+      -0.18272478878498077,
+      0.13190825283527374,
+      -0.11983760446310043,
+      -0.06405184417963028,
+      0.04142968729138374,
+      0.1867341846227646,
+      0.017752904444932938,
+      0.13623106479644775,
+      -0.12806148827075958,
+      -0.02293214574456215,
+      0.24818137288093567,
+      -0.011924889869987965,
+      0.014416932128369808,
+      0.23474723100662231,
+      0.02559884823858738,
+      0.027267878875136375,
+      0.0416608564555645,
+      0.08847064524888992,
+      -0.14466647803783417,
+      0.06649059802293777,
+      -0.22794397175312042,
+      -0.06643391400575638,
+      0.013687138445675373,
+      0.060284122824668884,
+      -0.05929145589470863,
+      0.0718596950173378,
+      -0.18963849544525146,
+      0.15245676040649414,
+      0.016958128660917282,
+      -0.05109502002596855,
+      -0.023466063663363457,
+      -0.04497256129980087,
+      -0.11560779809951782,
+      -0.09704524278640747,
+      0.12614136934280396,
+      -0.21546493470668793,
+      0.20635104179382324,
+      0.16536951065063477,
+      0.0777401328086853,
+      0.14979250729084015,
+      0.15566223859786987,
+      0.09666989743709564,
+      -0.02865252085030079,
+      -0.051753975450992584,
+      -0.17791157960891724,
+      -0.05986884981393814,
+      0.05631161108613014,
+      -0.08831688016653061,
+      0.09229611605405807,
+      0.011434672400355339
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/Pocahontas_kp0obo.png"
+  },
+  {
+    "name": "Napoleon",
+    "embedding": [
+      -0.19541171193122864,
+      0.07478208839893341,
+      0.07232566177845001,
+      -0.0782671570777893,
+      -0.22015321254730225,
+      -0.042188405990600586,
+      -0.03167761489748955,
+      -0.05067714676260948,
+      0.14097604155540466,
+      -0.06470044702291489,
+      0.09962022304534912,
+      0.01767825148999691,
+      -0.19450916349887848,
+      0.03291873261332512,
+      0.020543528720736504,
+      0.16249819099903107,
+      -0.1530856192111969,
+      -0.17599418759346008,
+      -0.12646281719207764,
+      -0.20518124103546143,
+      -0.017462918534874916,
+      0.13014744222164154,
+      -0.047164250165224075,
+      0.03690623864531517,
+      -0.16097773611545563,
+      -0.2816975712776184,
+      -0.07158689200878143,
+      -0.10753156244754791,
+      0.11368420720100403,
+      -0.09139145165681839,
+      0.034376539289951324,
+      -0.006875631865113974,
+      -0.1551388055086136,
+      -0.03881059214472771,
+      0.07428468763828278,
+      0.10010329633951187,
+      -0.0667034313082695,
+      -0.05609842762351036,
+      0.23340798914432526,
+      0.03646549955010414,
+      -0.16313180327415466,
+      0.05856937915086746,
+      0.1091194748878479,
+      0.3206029236316681,
+      0.1881428211927414,
+      -0.01778348907828331,
+      0.08857037872076035,
+      -0.06549856066703796,
+      0.13698038458824158,
+      -0.21900628507137299,
+      0.06314218789339066,
+      0.152081698179245,
+      0.10452701896429062,
+      0.09435120224952698,
+      0.12421238422393799,
+      -0.15052779018878937,
+      0.06581398844718933,
+      0.188494473695755,
+      -0.1938861757516861,
+      0.14377069473266602,
+      0.13587240874767303,
+      -0.08996313065290451,
+      -0.042971692979335785,
+      0.035816092044115067,
+      0.22570934891700745,
+      0.05932091549038887,
+      -0.07152652740478516,
+      -0.2095683515071869,
+      0.14650116860866547,
+      -0.18867072463035583,
+      -0.1419055312871933,
+      0.04761410132050514,
+      -0.10127267986536026,
+      -0.08123525977134705,
+      -0.3386855721473694,
+      0.045477308332920074,
+      0.3884667158126831,
+      0.12087417393922806,
+      -0.22797143459320068,
+      0.04702906683087349,
+      -0.004641909617930651,
+      -0.015306996181607246,
+      0.10673511028289795,
+      0.08305758237838745,
+      -0.14744485914707184,
+      -0.05794038251042366,
+      -0.1332477331161499,
+      0.044184986501932144,
+      0.24630723893642426,
+      0.030365880578756332,
+      0.024724094197154045,
+      0.1754070371389389,
+      0.1521969586610794,
+      -0.022638732567429543,
+      0.053208768367767334,
+      0.08668690919876099,
+      -0.177646666765213,
+      -0.11405406147241592,
+      -0.10062161087989807,
+      -0.07640594989061356,
+      0.06971357762813568,
+      -0.049816519021987915,
+      0.019256383180618286,
+      0.1625077873468399,
+      -0.21308006346225739,
+      0.25251275300979614,
+      -0.05561875179409981,
+      -0.06771360337734222,
+      -0.1607208102941513,
+      0.02155173383653164,
+      -0.03373187407851219,
+      0.02968485653400421,
+      0.16250605881214142,
+      -0.16385877132415771,
+      0.18293406069278717,
+      0.2271188348531723,
+      -0.01900394819676876,
+      0.1129697933793068,
+      0.0627797469496727,
+      -0.009934544563293457,
+      -0.045098450034856796,
+      0.055700816214084625,
+      -0.11938325315713882,
+      -0.09740202873945236,
+      -0.017326993867754936,
+      -0.06778541207313538,
+      0.05783836543560028,
+      0.10843202471733093
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921365/napolean_ukozvo.png"
+  },
+  {
+    "name": "Marie Antoinette",
+    "embedding": [
+      -0.07371512055397034,
+      -0.027123520150780678,
+      0.03849374130368233,
+      -0.14819476008415222,
+      -0.11383364349603653,
+      -0.04631344601511955,
+      -0.011093927547335625,
+      -0.10292480885982513,
+      0.15910887718200684,
+      -0.18151547014713287,
+      0.12286117672920227,
+      -0.0773485004901886,
+      -0.14210447669029236,
+      0.0720711424946785,
+      -0.08185681700706482,
+      0.2217492312192917,
+      -0.2233348786830902,
+      -0.14117899537086487,
+      -0.09667737036943436,
+      -0.1209031343460083,
+      -0.010817711241543293,
+      0.1720992475748062,
+      -0.03880985453724861,
+      0.11046367883682251,
+      -0.0875358134508133,
+      -0.24658027291297913,
+      -0.01271518412977457,
+      -0.034754954278469086,
+      0.06230749189853668,
+      -0.05215464159846306,
+      0.017724843695759773,
+      0.1804208904504776,
+      -0.13145597279071808,
+      0.08796010911464691,
+      0.05005302280187607,
+      0.13796263933181763,
+      -0.008298743516206741,
+      -0.11996594816446304,
+      0.20420627295970917,
+      0.07958831638097763,
+      -0.22655539214611053,
+      0.03090536594390869,
+      0.07042783498764038,
+      0.27100303769111633,
+      0.2351675033569336,
+      -0.0835689827799797,
+      -0.0023747787345200777,
+      -0.0961901992559433,
+      0.14726123213768005,
+      -0.3398396670818329,
+      -0.05585040897130966,
+      0.10838492214679718,
+      0.09401830285787582,
+      0.07982860505580902,
+      -0.0331152081489563,
+      -0.14961276948451996,
+      0.05395490676164627,
+      0.10060422867536545,
+      -0.21391314268112183,
+      0.04772563651204109,
+      0.053344644606113434,
+      -0.18538816273212433,
+      0.059203699231147766,
+      0.004405223298817873,
+      0.1863105297088623,
+      0.06951841711997986,
+      -0.10751508176326752,
+      -0.15855520963668823,
+      0.1568751335144043,
+      -0.25559043884277344,
+      -0.12953735888004303,
+      0.03880540281534195,
+      -0.06837525218725204,
+      -0.1516931802034378,
+      -0.29658758640289307,
+      -0.027162132784724236,
+      0.29944705963134766,
+      0.17708107829093933,
+      -0.14522822201251984,
+      0.11762270331382751,
+      -0.022886399179697037,
+      -0.020239008590579033,
+      0.06523548811674118,
+      0.19193659722805023,
+      -0.036562707275152206,
+      -0.044562727212905884,
+      -0.08084771037101746,
+      0.025292186066508293,
+      0.2732849419116974,
+      -0.059430018067359924,
+      -0.008411102928221226,
+      0.27726614475250244,
+      0.06450890004634857,
+      0.008257858455181122,
+      -0.015623556450009346,
+      0.052541110664606094,
+      -0.08626993000507355,
+      0.0039948648773133755,
+      -0.08101310580968857,
+      0.007097539026290178,
+      -0.04154157266020775,
+      0.012987588532269001,
+      0.05081970989704132,
+      0.16672757267951965,
+      -0.21719826757907867,
+      0.2738015651702881,
+      -0.1056494191288948,
+      -0.08120720833539963,
+      -0.013662864454090595,
+      -0.01221824437379837,
+      0.03226853534579277,
+      -0.03238985314965248,
+      0.13866789638996124,
+      -0.17468391358852386,
+      0.09364329278469086,
+      0.22766847908496857,
+      0.09918339550495148,
+      0.197307750582695,
+      0.029208237305283546,
+      0.05452761426568031,
+      0.023253493010997772,
+      -0.0008605380426160991,
+      -0.16116686165332794,
+      -0.04049895703792572,
+      0.035605430603027344,
+      -0.0450989194214344,
+      -0.0005037025548517704,
+      0.09475257247686386
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921363/Marie_Antoinette_fvjtgy.png"
+  },
+  {
+    "name": "Keith Haring",
+    "embedding": [
+      -0.11069408059120178,
+      0.11804386228322983,
+      0.052735377103090286,
+      -0.0075352066196501255,
+      -0.07914756238460541,
+      0.0002745387319009751,
+      -0.008305174298584461,
+      -0.14692376554012299,
+      0.13558848202228546,
+      -0.07018371671438217,
+      0.18397381901741028,
+      0.08163502812385559,
+      -0.1909518539905548,
+      -0.012639340944588184,
+      -0.035317592322826385,
+      0.09713511168956757,
+      -0.15720142424106598,
+      -0.11848689615726471,
+      -0.20776113867759705,
+      -0.08486000448465347,
+      -0.01993761770427227,
+      0.07373588532209396,
+      0.01056633796542883,
+      -0.05792998895049095,
+      -0.13591203093528748,
+      -0.22007079422473907,
+      -0.03541432321071625,
+      -0.026236187666654587,
+      0.12326456606388092,
+      -0.0460972934961319,
+      0.036845844238996506,
+      -0.03911682963371277,
+      -0.2691102623939514,
+      -0.06254886835813522,
+      0.07478392869234085,
+      0.04528716579079628,
+      -0.09871706366539001,
+      0.048941563814878464,
+      0.23048259317874908,
+      0.027087729424238205,
+      -0.21675916016101837,
+      0.09976706653833389,
+      0.09843820333480835,
+      0.25992193818092346,
+      0.19989879429340363,
+      0.022439947351813316,
+      -0.04449056088924408,
+      -0.07104942202568054,
+      0.06482796370983124,
+      -0.2669040262699127,
+      0.02263803780078888,
+      0.16203004121780396,
+      0.23608019948005676,
+      0.05903899669647217,
+      0.1417529433965683,
+      -0.15542425215244293,
+      -0.0034625951666384935,
+      0.13064594566822052,
+      -0.11680418252944946,
+      0.11316194385290146,
+      0.12119568884372711,
+      -0.09975210577249527,
+      -0.006744594778865576,
+      -0.06002594530582428,
+      0.12714974582195282,
+      0.011769797652959824,
+      -0.13185474276542664,
+      -0.09987132251262665,
+      0.09776592999696732,
+      -0.14191634953022003,
+      -0.011404983699321747,
+      0.117469921708107,
+      0.021912870928645134,
+      -0.15670181810855865,
+      -0.29112374782562256,
+      -0.034382082521915436,
+      0.400858998298645,
+      0.16755686700344086,
+      -0.20507916808128357,
+      -0.044934675097465515,
+      -0.07799560576677322,
+      -0.04559311270713806,
+      0.0011148913763463497,
+      0.00031199955265037715,
+      -0.14416752755641937,
+      -0.014222266152501106,
+      -0.048913806676864624,
+      0.032414380460977554,
+      0.19597162306308746,
+      0.0413491316139698,
+      0.039420899003744125,
+      0.21168000996112823,
+      0.01985141448676586,
+      -0.02017524652183056,
+      -0.058164216578006744,
+      0.01146236713975668,
+      -0.15328449010849,
+      -0.09089608490467072,
+      -0.08260989934206009,
+      -0.032918255776166916,
+      -0.0582839697599411,
+      -0.12485165894031525,
+      0.07978849858045578,
+      0.13049568235874176,
+      -0.21355023980140686,
+      0.21076884865760803,
+      -0.027846477925777435,
+      -0.016164353117346764,
+      -0.004021791275590658,
+      0.07709276676177979,
+      -0.02183757722377777,
+      0.03360702469944954,
+      0.14052332937717438,
+      -0.25984007120132446,
+      0.25595447421073914,
+      0.2092873901128769,
+      -0.08337969332933426,
+      0.04883412644267082,
+      0.0703076645731926,
+      0.012520486488938332,
+      -0.06532531976699829,
+      0.07653487473726273,
+      -0.13725413382053375,
+      -0.1727444976568222,
+      -0.07596892863512039,
+      -0.17820897698402405,
+      0.11386854201555252,
+      0.030900564044713974
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/keith_k7b5xw.png"
+  },
+  {
+    "name": "Malcolm X",
+    "embedding": [
+      -0.1439756155014038,
+      0.12336475402116776,
+      0.11320565640926361,
+      0.06918062269687653,
+      -0.039697084575891495,
+      -0.06880080699920654,
+      0.01588055118918419,
+      -0.16384488344192505,
+      0.17769278585910797,
+      -0.036676160991191864,
+      0.3758462369441986,
+      0.030613474547863007,
+      -0.14179468154907227,
+      -0.13778987526893616,
+      0.021104665473103523,
+      0.10792282968759537,
+      -0.21364615857601166,
+      -0.1270292103290558,
+      -0.08804670721292496,
+      -0.1494465172290802,
+      0.010823503136634827,
+      -0.01648639515042305,
+      0.027143003419041634,
+      0.05932161957025528,
+      -0.12562625110149384,
+      -0.3121587634086609,
+      -0.1082259863615036,
+      -0.16728609800338745,
+      0.09668982028961182,
+      -0.12614332139492035,
+      0.12089905142784119,
+      0.12230759859085083,
+      -0.14829865097999573,
+      -0.04245021566748619,
+      -0.026100434362888336,
+      0.004567587748169899,
+      0.0712207779288292,
+      -0.022029295563697815,
+      0.20716962218284607,
+      -0.07371477782726288,
+      -0.12483671307563782,
+      -0.04883945360779762,
+      0.025064611807465553,
+      0.29557424783706665,
+      0.22636279463768005,
+      0.04331178218126297,
+      0.0030676862224936485,
+      0.014902113005518913,
+      0.06188662350177765,
+      -0.2183355987071991,
+      0.01507574412971735,
+      0.10772620886564255,
+      0.14261679351329803,
+      0.001572694513015449,
+      0.02952754497528076,
+      -0.21326220035552979,
+      -0.04762238636612892,
+      0.0672367736697197,
+      -0.15589429438114166,
+      0.04920515418052673,
+      0.01419453602284193,
+      -0.16418911516666412,
+      -0.04669051989912987,
+      -0.001194636570289731,
+      0.2837163507938385,
+      0.1410345733165741,
+      -0.09764020889997482,
+      -0.09031195193529129,
+      0.20231571793556213,
+      -0.1360364705324173,
+      -0.08286327868700027,
+      0.0647234320640564,
+      -0.1647464483976364,
+      -0.132938414812088,
+      -0.3504889905452728,
+      0.03324005752801895,
+      0.5209611654281616,
+      0.06401310861110687,
+      -0.21533747017383575,
+      0.02310887537896633,
+      -0.16077692806720734,
+      0.058504488319158554,
+      -0.00795874372124672,
+      0.030628150328993797,
+      -0.16985127329826355,
+      -0.05729217454791069,
+      -0.16452206671237946,
+      -0.03548869490623474,
+      0.186416357755661,
+      0.07043752074241638,
+      -0.10226897895336151,
+      0.21755371987819672,
+      -0.0588323175907135,
+      0.007587333209812641,
+      0.044495392590761185,
+      -0.056666597723960876,
+      0.011193479411303997,
+      -0.049074944108724594,
+      -0.10386750847101212,
+      -0.06794071942567825,
+      0.0028441669419407845,
+      -0.06552483141422272,
+      -0.0021825579460710287,
+      0.1211632490158081,
+      -0.2404736578464508,
+      0.11163924634456635,
+      0.03069729171693325,
+      0.052249930799007416,
+      0.020582975819706917,
+      0.09109620004892349,
+      -0.11197599023580551,
+      -0.012824750505387783,
+      0.23008489608764648,
+      -0.2805309593677521,
+      0.19880475103855133,
+      0.18798744678497314,
+      0.05346565693616867,
+      0.2005307972431183,
+      0.06885834038257599,
+      0.11828549951314926,
+      -0.07972381263971329,
+      -0.02575445920228958,
+      -0.12851308286190033,
+      -0.029993347823619843,
+      0.041089605540037155,
+      -0.08595360070466995,
+      0.0672808364033699,
+      0.0753573328256607
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/malcolm_x_a8sluo.png"
+  },
+  {
+    "name": "Jimi Hendrix",
+    "embedding": [
+      -0.14963233470916748,
+      0.15338216722011566,
+      0.12277049571275711,
+      0.025456266477704048,
+      0.01678953319787979,
+      -0.13066565990447998,
+      -0.04036839306354523,
+      -0.06078389286994934,
+      0.08983433991670609,
+      0.004652153700590134,
+      0.314693808555603,
+      0.03631042689085007,
+      -0.1738082319498062,
+      -0.18858347833156586,
+      0.09537231177091599,
+      0.08902906626462936,
+      -0.1634139120578766,
+      -0.13732029497623444,
+      -0.06164136156439781,
+      -0.046894703060388565,
+      0.011080496944487095,
+      0.05511235445737839,
+      0.0033716964535415173,
+      0.07724315673112869,
+      -0.14023257791996002,
+      -0.28525859117507935,
+      -0.03282008320093155,
+      -0.13212153315544128,
+      0.024642502889037132,
+      -0.09164503216743469,
+      -0.06399668753147125,
+      0.017730912193655968,
+      -0.1649991273880005,
+      -0.07731983810663223,
+      0.01448390819132328,
+      0.049670569598674774,
+      0.07739412784576416,
+      -0.02893618680536747,
+      0.20520567893981934,
+      -0.004672287497669458,
+      -0.14739283919334412,
+      -0.005339747294783592,
+      0.06850995123386383,
+      0.2894229292869568,
+      0.2152731567621231,
+      -0.055073171854019165,
+      0.008901385590434074,
+      0.07041744887828827,
+      0.0597413070499897,
+      -0.24107125401496887,
+      0.05746558681130409,
+      0.13480006158351898,
+      0.20698116719722748,
+      0.058584000915288925,
+      0.0822155550122261,
+      -0.15761195123195648,
+      -0.0609503872692585,
+      0.07858217507600784,
+      -0.12797079980373383,
+      0.04494372755289078,
+      0.009393483400344849,
+      -0.06228838115930557,
+      -0.0018271099543198943,
+      -0.012885324656963348,
+      0.2570660412311554,
+      0.10026399046182632,
+      -0.12159080058336258,
+      -0.06985942274332047,
+      0.07416877150535583,
+      -0.10640320181846619,
+      -0.09758887439966202,
+      0.07769911736249924,
+      -0.1168561801314354,
+      -0.10800598561763763,
+      -0.27175024151802063,
+      0.09810983389616013,
+      0.31659236550331116,
+      0.10203100740909576,
+      -0.31112581491470337,
+      0.02608165703713894,
+      -0.1558186560869217,
+      -0.036663830280303955,
+      0.015457546338438988,
+      0.007486532907932997,
+      -0.048496827483177185,
+      0.023244693875312805,
+      -0.14927461743354797,
+      -0.008539954200387001,
+      0.2057247757911682,
+      0.06815385073423386,
+      -0.007680108305066824,
+      0.21275371313095093,
+      0.02068393863737583,
+      0.02119353413581848,
+      0.06418167799711227,
+      -0.026339828968048096,
+      0.00024017694522626698,
+      -0.07306309044361115,
+      -0.09160241484642029,
+      0.004124967847019434,
+      0.001246557803824544,
+      -0.09388558566570282,
+      -0.03202233463525772,
+      0.11322763562202454,
+      -0.21403737366199493,
+      0.05965195223689079,
+      0.07187295705080032,
+      0.0022400927264243364,
+      0.01069936715066433,
+      0.12218831479549408,
+      -0.04664696007966995,
+      -0.08561936765909195,
+      0.0829649269580841,
+      -0.2403281182050705,
+      0.21340583264827728,
+      0.13159871101379395,
+      -0.0009098657756112516,
+      0.12823958694934845,
+      -0.00777653232216835,
+      0.06486006081104279,
+      -0.04460472986102104,
+      -0.01353272795677185,
+      -0.017659341916441917,
+      -0.0937395989894867,
+      0.04067517817020416,
+      -0.02731141820549965,
+      0.08432871103286743,
+      0.05628969520330429
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/jimi_hendrix_u07bvu.png"
+  },
+  {
+    "name": "Joan of Arc",
+    "embedding": [
+      -0.08414352685213089,
+      0.06791780143976212,
+      0.11847313493490219,
+      0.002739380346611142,
+      -0.1758708953857422,
+      -0.0046234033070504665,
+      -0.01391948014497757,
+      -0.09791609644889832,
+      0.1887952834367752,
+      -0.12390564382076263,
+      0.18841464817523956,
+      -0.016024380922317505,
+      -0.2242671549320221,
+      0.09211713820695877,
+      0.02648857980966568,
+      0.18952584266662598,
+      -0.20633858442306519,
+      -0.17909355461597443,
+      -0.09580980241298676,
+      -0.13922202587127686,
+      0.009242200292646885,
+      0.1462208330631256,
+      -0.005492495838552713,
+      0.05018102750182152,
+      -0.2112187296152115,
+      -0.27055275440216064,
+      -0.08311107009649277,
+      -0.12756964564323425,
+      0.046928130090236664,
+      -0.052767910063266754,
+      -0.0414142943918705,
+      0.08874200284481049,
+      -0.0964246466755867,
+      -0.0012355938088148832,
+      0.11157932132482529,
+      0.067625992000103,
+      -0.03487484157085419,
+      -0.14403179287910461,
+      0.17915959656238556,
+      0.024800298735499382,
+      -0.25940194725990295,
+      0.010731985792517662,
+      0.14637260138988495,
+      0.2865757942199707,
+      0.28700950741767883,
+      -0.03443106263875961,
+      -0.0013913096627220511,
+      -0.0960312932729721,
+      0.17944864928722382,
+      -0.3283175826072693,
+      0.02685094065964222,
+      0.13229940831661224,
+      0.11399319767951965,
+      0.1263381689786911,
+      0.10951080173254013,
+      -0.14835982024669647,
+      0.03419661149382591,
+      0.1417221575975418,
+      -0.17872370779514313,
+      0.029667401686310768,
+      0.11245305091142654,
+      -0.13272613286972046,
+      0.020628686994314194,
+      -0.07295333594083786,
+      0.22836415469646454,
+      0.07187801599502563,
+      -0.13520891964435577,
+      -0.15324704349040985,
+      0.09379225224256516,
+      -0.21748857200145721,
+      -0.2126261591911316,
+      0.08317357301712036,
+      -0.14277596771717072,
+      -0.1524803340435028,
+      -0.35282695293426514,
+      -0.027381107211112976,
+      0.4082174599170685,
+      0.13818836212158203,
+      -0.1834654062986374,
+      0.1138419657945633,
+      0.011923909187316895,
+      -0.019590163603425026,
+      0.006490292958915234,
+      0.20933957397937775,
+      -0.04145878925919533,
+      -0.022403616458177567,
+      -0.09356770664453506,
+      -0.0018625784432515502,
+      0.29332539439201355,
+      -0.0624932199716568,
+      0.03413933888077736,
+      0.2805521786212921,
+      0.015035971999168396,
+      -0.008794416673481464,
+      0.040072131901979446,
+      0.09985165297985077,
+      -0.13595019280910492,
+      -0.09106018394231796,
+      -0.12696702778339386,
+      -0.09300140291452408,
+      -0.008745568804442883,
+      0.012846807017922401,
+      -0.020570505410432816,
+      0.13217875361442566,
+      -0.28798604011535645,
+      0.25041577219963074,
+      -0.08247847855091095,
+      -0.035833682864904404,
+      -0.042582664638757706,
+      -0.1274249404668808,
+      0.020312471315264702,
+      0.08208528161048889,
+      0.17672432959079742,
+      -0.2668726146221161,
+      0.10106400400400162,
+      0.16270895302295685,
+      0.03489557281136513,
+      0.15373098850250244,
+      0.006153969094157219,
+      -0.006481884513050318,
+      -0.053628623485565186,
+      -0.002134778769686818,
+      -0.21147260069847107,
+      -0.08954478800296783,
+      0.058255065232515335,
+      -0.11648241430521011,
+      -0.0005227425135672092,
+      0.05774602293968201
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/Joan_of_Arc_vvi28l.png"
+  },
+  {
+    "name": "Leonardo da Vinci",
+    "embedding": [
+      -0.21480895578861237,
+      0.1964903622865677,
+      0.10859137028455734,
+      -0.0933775082230568,
+      -0.13483783602714539,
+      0.09444442391395569,
+      -0.036436352878808975,
+      -0.08236145228147507,
+      0.15535041689872742,
+      -0.14111322164535522,
+      0.18513870239257812,
+      0.06543952971696854,
+      -0.16282609105110168,
+      0.0039747306145727634,
+      -0.009284891188144684,
+      0.1278001070022583,
+      -0.15049584209918976,
+      -0.16660702228546143,
+      -0.09469615668058395,
+      -0.15840736031532288,
+      -0.03617819398641586,
+      0.12339956313371658,
+      -0.022857511416077614,
+      0.06612122058868408,
+      -0.21171526610851288,
+      -0.2686157524585724,
+      -0.028869571164250374,
+      -0.057775795459747314,
+      0.15800851583480835,
+      -0.08750161528587341,
+      -0.018636824563145638,
+      -0.025035271421074867,
+      -0.21388693153858185,
+      -0.01850433088839054,
+      -4.700915451394394e-05,
+      0.17285074293613434,
+      -0.09820228070020676,
+      -0.06337834149599075,
+      0.2262229174375534,
+      0.01569901965558529,
+      -0.17003260552883148,
+      0.02904176525771618,
+      0.06754739582538605,
+      0.36993515491485596,
+      0.20760932564735413,
+      -0.010373817756772041,
+      0.047358911484479904,
+      -0.11646737158298492,
+      0.16212248802185059,
+      -0.20035263895988464,
+      0.11706764996051788,
+      0.17150799930095673,
+      0.08470035344362259,
+      0.13999629020690918,
+      0.0298357754945755,
+      -0.18233393132686615,
+      0.05623377114534378,
+      0.16143858432769775,
+      -0.14874613285064697,
+      0.05787276849150658,
+      0.07100318372249603,
+      -0.08525744080543518,
+      0.0323944054543972,
+      -0.021739430725574493,
+      0.2068597823381424,
+      0.06944393366575241,
+      -0.07114773988723755,
+      -0.21339233219623566,
+      0.11410311609506607,
+      -0.16064807772636414,
+      -0.09618990123271942,
+      0.1067701205611229,
+      -0.10108718276023865,
+      -0.10851213335990906,
+      -0.33443164825439453,
+      0.08381801098585129,
+      0.37141406536102295,
+      0.21231402456760406,
+      -0.14536994695663452,
+      0.05932777747511864,
+      -0.042701054364442825,
+      -0.056582801043987274,
+      0.1248813271522522,
+      0.15747733414173126,
+      -0.10680891573429108,
+      -0.0583016462624073,
+      -0.06699784100055695,
+      0.09089521318674088,
+      0.2457207441329956,
+      0.04019420966506004,
+      -0.052071936428546906,
+      0.14482206106185913,
+      0.10725868493318558,
+      -0.03341756761074066,
+      0.021066540852189064,
+      0.10760165005922318,
+      -0.22618377208709717,
+      0.013630909845232964,
+      -0.09799058735370636,
+      -0.053505830466747284,
+      0.02845793031156063,
+      0.014815307222306728,
+      0.04180913418531418,
+      0.18336035311222076,
+      -0.24792306125164032,
+      0.3230937421321869,
+      -0.005858270451426506,
+      -0.019325081259012222,
+      -0.01466701552271843,
+      -0.01325760968029499,
+      -0.050312258303165436,
+      0.0018631508573889732,
+      0.16241048276424408,
+      -0.22389717400074005,
+      0.20035918056964874,
+      0.19454656541347504,
+      -0.006656058598309755,
+      0.19269397854804993,
+      0.17410077154636383,
+      0.05876052752137184,
+      -0.001976185943931341,
+      0.05202127993106842,
+      -0.15606829524040222,
+      -0.07407243549823761,
+      0.05754915997385979,
+      -0.09371062368154526,
+      0.1554705649614334,
+      0.07618653774261475
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921362/leonardo_davinci_lv7gy8.png"
+  },
+  {
+    "name": "Cleopatra",
+    "embedding": [
+      -0.17426720261573792,
+      0.03424390032887459,
+      0.03988884761929512,
+      -0.11769137531518936,
+      -0.1037851870059967,
+      -0.030764924362301826,
+      -0.015277977101504803,
+      -0.1266300231218338,
+      0.2747111916542053,
+      -0.13247132301330566,
+      0.20019887387752533,
+      -0.06275222450494766,
+      -0.24462440609931946,
+      0.08541355282068253,
+      -0.17453642189502716,
+      0.19446316361427307,
+      -0.2240418940782547,
+      -0.18652087450027466,
+      -0.045861903578042984,
+      -0.1217224970459938,
+      0.09595494717359543,
+      0.08980652689933777,
+      -0.004929330199956894,
+      0.16616563498973846,
+      -0.11557414382696152,
+      -0.318159818649292,
+      -0.04648806154727936,
+      -0.07531516999006271,
+      -0.009897720068693161,
+      -0.11067459732294083,
+      0.06742560863494873,
+      0.12318100780248642,
+      -0.3031368851661682,
+      0.044052451848983765,
+      -0.03681753948330879,
+      0.2076931893825531,
+      0.027125433087348938,
+      -0.08679557591676712,
+      0.12514851987361908,
+      0.09594148397445679,
+      -0.22568075358867645,
+      -0.024157874286174774,
+      0.0739976093173027,
+      0.2830972969532013,
+      0.2293141484260559,
+      0.020607968792319298,
+      -0.049463506788015366,
+      -0.182012677192688,
+      0.12608005106449127,
+      -0.31485816836357117,
+      0.02025885507464409,
+      0.1986856609582901,
+      0.018181491643190384,
+      0.0661361813545227,
+      0.050152428448200226,
+      -0.2069883793592453,
+      0.09036635607481003,
+      0.06023776903748512,
+      -0.16802698373794556,
+      -0.005311307031661272,
+      0.12895679473876953,
+      -0.05158798396587372,
+      0.06611804664134979,
+      -0.09547702223062515,
+      0.21990840137004852,
+      0.0616958811879158,
+      -0.08762698620557785,
+      -0.055246416479349136,
+      0.18792381882667542,
+      -0.20527483522891998,
+      -0.07089978456497192,
+      0.08222343027591705,
+      -0.11641374975442886,
+      -0.2276407778263092,
+      -0.326405793428421,
+      0.043733902275562286,
+      0.4710141718387604,
+      0.20925694704055786,
+      -0.08254772424697876,
+      0.15333004295825958,
+      -0.046766817569732666,
+      0.029735688120126724,
+      0.07248510420322418,
+      0.13268420100212097,
+      -0.07370562106370926,
+      0.06907626986503601,
+      -0.14050737023353577,
+      0.10361477732658386,
+      0.2064601480960846,
+      0.05065784603357315,
+      0.01035297755151987,
+      0.25839489698410034,
+      -0.03851564973592758,
+      -0.004987064749002457,
+      0.06610406935214996,
+      0.08174838870763779,
+      -0.14282041788101196,
+      0.010737299919128418,
+      -0.1966818869113922,
+      -0.037828780710697174,
+      -0.08583147823810577,
+      0.023910952731966972,
+      -0.013082400895655155,
+      0.06662309169769287,
+      -0.17745544016361237,
+      0.1334773302078247,
+      -0.04779443144798279,
+      -0.1138824075460434,
+      -0.12089013308286667,
+      -0.03443480283021927,
+      -0.05042241886258125,
+      0.025685526430606842,
+      0.14507415890693665,
+      -0.23033015429973602,
+      0.17615385353565216,
+      0.12816312909126282,
+      0.0597149133682251,
+      0.24076160788536072,
+      0.06970825791358948,
+      0.1454434096813202,
+      -0.07542144507169724,
+      -0.07609934359788895,
+      -0.14726878702640533,
+      -0.023060563951730728,
+      0.056600332260131836,
+      -0.04860732704401016,
+      0.09873836487531662,
+      0.042676642537117004
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921359/cleopatra_zcslcx.png"
+  },
+  {
+    "name": "Frida Kahlo",
+    "embedding": [
+      -0.14420245587825775,
+      0.10458364337682724,
+      0.03689911961555481,
+      -0.04160111024975777,
+      -0.03697687387466431,
+      -0.04405571520328522,
+      -0.010716477409005165,
+      -0.07847636938095093,
+      0.18769149482250214,
+      -0.054044343531131744,
+      0.13756325840950012,
+      0.00346665782853961,
+      -0.21425487101078033,
+      0.01861690543591976,
+      -0.05854889005422592,
+      0.13590271770954132,
+      -0.14089222252368927,
+      -0.19441795349121094,
+      -0.07613706588745117,
+      0.015928063541650772,
+      0.08771613240242004,
+      0.060788754373788834,
+      0.038185253739356995,
+      0.14053060114383698,
+      -0.11785571277141571,
+      -0.2451833337545395,
+      -0.029909467324614525,
+      -0.09063182026147842,
+      0.028351323679089546,
+      -0.05214407294988632,
+      -0.04019802808761597,
+      0.03105832450091839,
+      -0.24434849619865417,
+      -0.06335650384426117,
+      0.04804597795009613,
+      0.1733759492635727,
+      -0.029759110882878304,
+      -0.10562937706708908,
+      0.23651380836963654,
+      0.06266549229621887,
+      -0.1849900633096695,
+      -0.004989645443856716,
+      0.037837591022253036,
+      0.2944006323814392,
+      0.134351909160614,
+      0.042474664747714996,
+      0.004066604655236006,
+      -0.10759886354207993,
+      0.13643616437911987,
+      -0.27032238245010376,
+      -0.03539801761507988,
+      0.1839628964662552,
+      0.04349278658628464,
+      0.11120203137397766,
+      0.03021020069718361,
+      -0.20435655117034912,
+      0.18521423637866974,
+      0.07926265895366669,
+      -0.25201016664505005,
+      0.009767117910087109,
+      0.01701083593070507,
+      -0.05680607631802559,
+      0.08570802956819534,
+      -0.019429659470915794,
+      0.24381859600543976,
+      0.023357244208455086,
+      -0.06064063683152199,
+      -0.06612702459096909,
+      0.14346946775913239,
+      -0.17094850540161133,
+      -0.03891858831048012,
+      0.09489475190639496,
+      -0.07583335041999817,
+      -0.18574431538581848,
+      -0.24355435371398926,
+      -0.021506881341338158,
+      0.3837907612323761,
+      0.18113800883293152,
+      -0.14616915583610535,
+      0.13129861652851105,
+      -0.07242460548877716,
+      -0.04820910468697548,
+      0.04079171642661095,
+      0.061146318912506104,
+      -0.11208650469779968,
+      0.11404219269752502,
+      -0.15693369507789612,
+      -0.009154030121862888,
+      0.2692919075489044,
+      0.04970327764749527,
+      0.04198377951979637,
+      0.22777457535266876,
+      0.0867776870727539,
+      -0.027933692559599876,
+      0.1339101642370224,
+      0.025473352521657944,
+      -0.10613969713449478,
+      -0.046624667942523956,
+      -0.1891385018825531,
+      -0.026944726705551147,
+      -0.06838975846767426,
+      -0.09697038680315018,
+      -0.011520173400640488,
+      0.07531712204217911,
+      -0.24989569187164307,
+      0.09561960399150848,
+      -0.008725278079509735,
+      -0.11250335723161697,
+      -0.11646605283021927,
+      0.011501208879053593,
+      -0.11710400879383087,
+      -0.044750045984983444,
+      0.11426522582769394,
+      -0.2409985512495041,
+      0.1630023568868637,
+      0.1813814789056778,
+      0.054486047476530075,
+      0.1621924191713333,
+      0.05874980613589287,
+      0.08349912613630295,
+      -0.07651396095752716,
+      0.005308353342115879,
+      -0.09482042491436005,
+      -0.11671998351812363,
+      0.09709066152572632,
+      -0.0005331318243406713,
+      0.11459052562713623,
+      0.045373864471912384
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/frida_khalo_wq6qyl.png"
+  },
+  {
+    "name": "JFK",
+    "embedding": [
+      0.03816397488117218,
+      0.0501725934445858,
+      0.04019831120967865,
+      0.003746476722881198,
+      -0.14492273330688477,
+      -0.016152862459421158,
+      -0.011278822086751461,
+      -0.16927705705165863,
+      0.12656661868095398,
+      -0.05189354717731476,
+      0.18962213397026062,
+      -0.03856382146477699,
+      -0.24665556848049164,
+      -0.13918206095695496,
+      0.04186717048287392,
+      0.05971083417534828,
+      -0.08131542801856995,
+      -0.13424932956695557,
+      -0.1532323956489563,
+      -0.08581999689340591,
+      0.013965221121907234,
+      -0.01739569567143917,
+      0.14648838341236115,
+      -0.005879305303096771,
+      -0.2083701342344284,
+      -0.2857029139995575,
+      -0.16260547935962677,
+      -0.1450348198413849,
+      0.11069291085004807,
+      -0.1315349042415619,
+      -0.022549938410520554,
+      0.016218507662415504,
+      -0.2513463795185089,
+      -0.10490032285451889,
+      -0.005115616600960493,
+      0.04190170764923096,
+      -0.06766113638877869,
+      -0.1287124902009964,
+      0.15225540101528168,
+      -0.006412163842469454,
+      -0.1355406790971756,
+      0.04583916440606117,
+      -0.01986522786319256,
+      0.15991981327533722,
+      0.2254922091960907,
+      0.02081507071852684,
+      0.014994566328823566,
+      -0.06456455588340759,
+      0.10667797178030014,
+      -0.2462044656276703,
+      0.1352485567331314,
+      0.13253992795944214,
+      0.13717837631702423,
+      0.09044431149959564,
+      0.050658367574214935,
+      -0.003992415964603424,
+      0.12635095417499542,
+      0.1976056694984436,
+      -0.28474581241607666,
+      0.13950486481189728,
+      0.10443659871816635,
+      -0.0950930044054985,
+      -0.08225426077842712,
+      0.0426797941327095,
+      0.16148319840431213,
+      0.15108978748321533,
+      -0.07200933247804642,
+      -0.115679070353508,
+      0.10818812251091003,
+      -0.2228017896413803,
+      -0.041789714246988297,
+      0.11898328363895416,
+      -0.11554274708032608,
+      -0.15210947394371033,
+      -0.2806415855884552,
+      0.0134501988068223,
+      0.49613437056541443,
+      0.12439163029193878,
+      -0.2538386583328247,
+      -0.06866631656885147,
+      -0.10039742290973663,
+      0.011418769136071205,
+      0.09906552731990814,
+      0.033202897757291794,
+      -0.03682144358754158,
+      -0.1461203396320343,
+      -0.14558759331703186,
+      0.04332023486495018,
+      0.23589341342449188,
+      -0.08595431596040726,
+      -0.050996795296669006,
+      0.31218257546424866,
+      0.052470527589321136,
+      0.043296102434396744,
+      0.046175289899110794,
+      0.04811948910355568,
+      -0.029480716213583946,
+      -0.05420243367552757,
+      0.004359560087323189,
+      0.015008249320089817,
+      0.06939907371997833,
+      -0.10011787712574005,
+      -0.08623337745666504,
+      0.03919937089085579,
+      -0.11610318720340729,
+      0.18074873089790344,
+      0.013775615952908993,
+      -0.020963266491889954,
+      0.0715063139796257,
+      -0.1271909922361374,
+      -0.0793745219707489,
+      -0.06930060684680939,
+      0.1760944128036499,
+      -0.33044373989105225,
+      0.21707069873809814,
+      0.197781041264534,
+      -0.03323884308338165,
+      0.06968758255243301,
+      -0.05224740132689476,
+      0.09924714267253876,
+      0.005082629155367613,
+      -0.06059540808200836,
+      -0.1320222020149231,
+      -0.10124208778142929,
+      0.03535178303718567,
+      -0.08356571942567825,
+      -0.022595494985580444,
+      -0.0007893760339356959
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/jfk_rznzq0.png"
+  },
+  {
+    "name": "James Dean",
+    "embedding": [
+      -0.07548771053552628,
+      0.05236786976456642,
+      0.06550166755914688,
+      -0.05401507019996643,
+      -0.1491912603378296,
+      -0.019256696105003357,
+      -0.052859023213386536,
+      -0.07957153022289276,
+      0.0789794921875,
+      0.011725332587957382,
+      0.22528260946273804,
+      0.02247786521911621,
+      -0.13044370710849762,
+      -0.05936697497963905,
+      -0.09287943691015244,
+      0.08864694833755493,
+      -0.11666391789913177,
+      -0.14332352578639984,
+      -0.06321973353624344,
+      -0.09319265186786652,
+      -0.02121439203619957,
+      0.06729425489902496,
+      -0.07413943856954575,
+      0.06311271339654922,
+      -0.12842749059200287,
+      -0.21414436399936676,
+      -0.05606020614504814,
+      -0.07225440442562103,
+      0.010916435159742832,
+      -0.12259441614151001,
+      0.10116066783666611,
+      0.022005243226885796,
+      -0.2246779054403305,
+      -0.10033200681209564,
+      0.037921879440546036,
+      0.0952136367559433,
+      -0.16180026531219482,
+      -0.06685571372509003,
+      0.1730450987815857,
+      0.03738411143422127,
+      -0.11577156186103821,
+      0.14937126636505127,
+      0.07029237598180771,
+      0.4024256467819214,
+      0.21395045518875122,
+      0.028253478929400444,
+      -0.007785405032336712,
+      -0.03956388309597969,
+      0.11831352114677429,
+      -0.2759973704814911,
+      0.08552946150302887,
+      0.19392308592796326,
+      0.1126275435090065,
+      0.09523900598287582,
+      0.02116589993238449,
+      -0.12849494814872742,
+      0.07422712445259094,
+      0.20928938686847687,
+      -0.1783677190542221,
+      0.12883517146110535,
+      0.06137690320611,
+      -0.09088979661464691,
+      0.0537542961537838,
+      -0.040500860661268234,
+      0.20390397310256958,
+      0.03684762865304947,
+      -0.08673881739377975,
+      -0.10389775782823563,
+      0.11228647083044052,
+      -0.10071975737810135,
+      -0.0871456190943718,
+      0.06550897657871246,
+      -0.11709871888160706,
+      -0.17523685097694397,
+      -0.2501726746559143,
+      0.11926274746656418,
+      0.40750089287757874,
+      0.08909354358911514,
+      -0.1845717430114746,
+      0.0483488030731678,
+      -0.09833447635173798,
+      0.025846028700470924,
+      0.0495074987411499,
+      0.0008782699587754905,
+      0.013706657104194164,
+      -0.16866137087345123,
+      -0.11442580074071884,
+      -0.005198237486183643,
+      0.23507820069789886,
+      -0.0016052299179136753,
+      -0.011690851300954819,
+      0.19105932116508484,
+      0.041889723390340805,
+      -0.10983563959598541,
+      0.054057974368333817,
+      0.0289445910602808,
+      -0.10858923941850662,
+      0.06327644735574722,
+      -0.08679100126028061,
+      0.0012905066832900047,
+      -0.028528723865747452,
+      -0.10781966894865036,
+      0.016023041680455208,
+      0.0756182074546814,
+      -0.219961479306221,
+      0.24260376393795013,
+      0.05666090175509453,
+      0.011882022954523563,
+      0.005700568202883005,
+      -0.03767729923129082,
+      -0.09546826779842377,
+      0.011125246062874794,
+      0.2031695395708084,
+      -0.29384100437164307,
+      0.3392222821712494,
+      0.1502649337053299,
+      0.09110265225172043,
+      0.16520607471466064,
+      0.08043451607227325,
+      0.032930564135313034,
+      -0.04048497974872589,
+      -0.025285394862294197,
+      -0.11482784897089005,
+      -0.07660824060440063,
+      -0.017222125083208084,
+      -0.047092534601688385,
+      0.058511149138212204,
+      0.08752728998661041
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/james_dean_wvmc5c.png"
+  },
+  {
+    "name": "Coco Chanel",
+    "embedding": [
+      -0.20518945157527924,
+      0.06626282632350922,
+      0.06851157546043396,
+      -0.06967638432979584,
+      -0.21829453110694885,
+      -0.075140580534935,
+      -0.02957265079021454,
+      -0.12210817635059357,
+      0.1659713089466095,
+      -0.16096121072769165,
+      0.11673251539468765,
+      -0.03865319490432739,
+      -0.2091985046863556,
+      0.12216361612081528,
+      -0.12443868070840836,
+      0.15456579625606537,
+      -0.22115755081176758,
+      -0.22074976563453674,
+      -0.05474860221147537,
+      -0.1273576021194458,
+      0.040361061692237854,
+      0.09280674904584885,
+      0.019920222461223602,
+      0.1532232016324997,
+      -0.10954080522060394,
+      -0.265997052192688,
+      -0.0620647594332695,
+      -0.13381639122962952,
+      0.07539917528629303,
+      -0.08034955710172653,
+      -0.00504631083458662,
+      0.027179954573512077,
+      -0.202069953083992,
+      -0.035481780767440796,
+      0.016025332733988762,
+      0.12549427151679993,
+      -0.016061361879110336,
+      -0.12927408516407013,
+      0.1779927909374237,
+      0.04212524741888046,
+      -0.28047075867652893,
+      0.013323288410902023,
+      0.10619504004716873,
+      0.3680499196052551,
+      0.2938884198665619,
+      0.009564015083014965,
+      -0.018748538568615913,
+      -0.12019958347082138,
+      0.20878781378269196,
+      -0.3347342908382416,
+      0.03056972846388817,
+      0.17285124957561493,
+      0.0237348061054945,
+      0.05492618307471275,
+      0.056300774216651917,
+      -0.18699167668819427,
+      0.08605293929576874,
+      0.12058337032794952,
+      -0.17874370515346527,
+      0.0822150856256485,
+      0.16575534641742706,
+      -0.03893517330288887,
+      0.10224945098161697,
+      -0.07532411068677902,
+      0.2568870484828949,
+      0.02740822173655033,
+      -0.11059882491827011,
+      -0.09013133496046066,
+      0.20384906232357025,
+      -0.2600407302379608,
+      -0.07233774662017822,
+      0.1208488717675209,
+      -0.1403523087501526,
+      -0.2031772881746292,
+      -0.22926965355873108,
+      0.019922006875276566,
+      0.4845677614212036,
+      0.2243989109992981,
+      -0.009749538265168667,
+      0.1336437314748764,
+      -0.0688999593257904,
+      0.0013178341323509812,
+      0.03295786678791046,
+      0.18067234754562378,
+      -0.045194465667009354,
+      0.030216410756111145,
+      -0.10235971212387085,
+      0.05401075258851051,
+      0.2770026922225952,
+      0.0175919309258461,
+      0.01364903524518013,
+      0.3013869822025299,
+      0.03750135377049446,
+      -0.06225619465112686,
+      0.09459403902292252,
+      0.0988348051905632,
+      -0.1737586259841919,
+      -0.03697270154953003,
+      -0.19006501138210297,
+      -0.03246994689106941,
+      -0.08244717866182327,
+      -0.07621739059686661,
+      0.0033211112022399902,
+      0.08862634748220444,
+      -0.21190793812274933,
+      0.15952391922473907,
+      -0.0945480465888977,
+      -0.023178188130259514,
+      -0.13271847367286682,
+      -0.07330495119094849,
+      -0.03772936388850212,
+      0.03480841591954231,
+      0.1677464097738266,
+      -0.2106119990348816,
+      0.16577477753162384,
+      0.18309786915779114,
+      0.12014422565698624,
+      0.18302789330482483,
+      0.06133589893579483,
+      0.015499589964747429,
+      -0.0002917057427112013,
+      -0.0531025268137455,
+      -0.14457769691944122,
+      -0.05983344092965126,
+      0.049115683883428574,
+      -0.1118304431438446,
+      0.07815694808959961,
+      0.07629139721393585
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921358/Coco_Chanel_mnx6s9.png"
+  },
+  {
+    "name": "Elvis Presley",
+    "embedding": [
+      -0.1664579212665558,
+      0.06181998923420906,
+      0.12631188333034515,
+      -0.08401378244161606,
+      -0.1456727832555771,
+      0.025471562519669533,
+      -0.05991227179765701,
+      -0.07005785405635834,
+      0.04633138328790665,
+      -0.15882490575313568,
+      0.19829775393009186,
+      -0.0726400837302208,
+      -0.20403629541397095,
+      -0.003037181682884693,
+      0.0441470704972744,
+      0.20303727686405182,
+      -0.06767140328884125,
+      -0.11446166038513184,
+      -0.1476229429244995,
+      -0.16248221695423126,
+      0.033512797206640244,
+      0.08681169152259827,
+      -0.06348370015621185,
+      0.07783133536577225,
+      -0.23392851650714874,
+      -0.2700210213661194,
+      -0.09340187162160873,
+      -0.05785968527197838,
+      -0.040608447045087814,
+      -0.14184483885765076,
+      -0.08309076726436615,
+      0.03024524264037609,
+      -0.20653365552425385,
+      -0.019649971276521683,
+      0.016433145850896835,
+      0.10483025759458542,
+      -0.037395771592855453,
+      -0.08576264977455139,
+      0.08157890290021896,
+      0.0681670755147934,
+      -0.13562142848968506,
+      0.03939788416028023,
+      0.037620656192302704,
+      0.2432442158460617,
+      0.20164331793785095,
+      0.05999121069908142,
+      -0.005264374893158674,
+      0.022054575383663177,
+      0.1581328809261322,
+      -0.26557525992393494,
+      0.14366163313388824,
+      0.046869195997714996,
+      0.08139753341674805,
+      0.08965637534856796,
+      0.10599100589752197,
+      -0.1388716995716095,
+      -0.018384138122200966,
+      0.21377335488796234,
+      -0.18306206166744232,
+      0.07710660248994827,
+      0.029049357399344444,
+      -0.11518235504627228,
+      -0.04396805539727211,
+      -0.1082279309630394,
+      0.20645198225975037,
+      0.19930504262447357,
+      -0.1241481676697731,
+      -0.09976651519536972,
+      0.18644124269485474,
+      -0.05630519986152649,
+      -0.04961715266108513,
+      -0.006450049113482237,
+      -0.14587163925170898,
+      -0.13063812255859375,
+      -0.28481391072273254,
+      0.13002793490886688,
+      0.34406784176826477,
+      0.17693573236465454,
+      -0.22724884748458862,
+      -0.04080164432525635,
+      0.01765875704586506,
+      0.044468507170677185,
+      0.07723578810691833,
+      0.06361879408359528,
+      -0.012844211421906948,
+      -0.05528029799461365,
+      -0.0016449113609269261,
+      0.09569364786148071,
+      0.16874179244041443,
+      0.021923579275608063,
+      -0.030435752123594284,
+      0.2874443829059601,
+      -0.035078808665275574,
+      -0.010640272870659828,
+      0.0208485946059227,
+      0.031957052648067474,
+      -0.14424477517604828,
+      -0.064393550157547,
+      -0.051223158836364746,
+      -0.01900440827012062,
+      0.03720352053642273,
+      -0.024947496131062508,
+      -0.003995679318904877,
+      0.15295730531215668,
+      -0.12459122389554977,
+      0.2109169363975525,
+      -0.06419545412063599,
+      0.05111578851938248,
+      -0.08195246756076813,
+      0.012913382612168789,
+      -0.11566495150327682,
+      0.019657054916024208,
+      0.08583527058362961,
+      -0.2243541032075882,
+      0.14557678997516632,
+      0.15242482721805573,
+      -0.05642988160252571,
+      0.11260721832513809,
+      0.07288125902414322,
+      0.033121366053819656,
+      0.05498315766453743,
+      -0.0044463216327130795,
+      -0.21029658615589142,
+      -0.08681024610996246,
+      0.18302814662456512,
+      -0.056162893772125244,
+      0.058182068169116974,
+      0.08249559253454208
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png"
+  },
+  {
+    "name": "Che Guevara",
+    "embedding": [
+      -0.17163622379302979,
+      0.1096557080745697,
+      0.00042635254794731736,
+      -0.020618632435798645,
+      -0.017379797995090485,
+      -0.07241670042276382,
+      -0.02048766240477562,
+      -0.12943141162395477,
+      0.19442695379257202,
+      -0.011845688335597515,
+      0.2121857851743698,
+      -0.044428687542676926,
+      -0.17936009168624878,
+      -0.05834522098302841,
+      -0.0964781641960144,
+      0.06535748392343521,
+      -0.23112547397613525,
+      -0.15850184857845306,
+      -0.03890823572874069,
+      -0.09176300466060638,
+      0.11317247897386551,
+      -0.006171488203108311,
+      0.018414519727230072,
+      0.1256762593984604,
+      -0.06884292513132095,
+      -0.25627756118774414,
+      -0.04783741757273674,
+      -0.15854942798614502,
+      0.13257789611816406,
+      -0.1355271339416504,
+      -0.002253561047837138,
+      -0.007825486361980438,
+      -0.23826460540294647,
+      -0.13191932439804077,
+      0.003046655561774969,
+      0.10555429011583328,
+      -0.04967908188700676,
+      -0.08618444949388504,
+      0.24577400088310242,
+      -0.05456565320491791,
+      -0.1340140551328659,
+      -0.007155600469559431,
+      0.03814486414194107,
+      0.34307029843330383,
+      0.17053809762001038,
+      0.05347588285803795,
+      -0.07536690682172775,
+      -0.022421734407544136,
+      0.1964941769838333,
+      -0.25565624237060547,
+      0.09557782858610153,
+      0.20517626404762268,
+      0.18160861730575562,
+      0.0990375429391861,
+      0.08568812906742096,
+      -0.18553794920444489,
+      0.05733460187911987,
+      0.15576903522014618,
+      -0.1258212774991989,
+      0.11395598948001862,
+      0.053595684468746185,
+      -0.053993888199329376,
+      0.1239609643816948,
+      -0.024601444602012634,
+      0.2067527174949646,
+      0.03946411609649658,
+      -0.09828241914510727,
+      -0.032482393085956573,
+      0.06156507134437561,
+      -0.08365372568368912,
+      -0.033441632986068726,
+      0.09672291576862335,
+      -0.09778833389282227,
+      -0.2016618400812149,
+      -0.2106471061706543,
+      0.053055521100759506,
+      0.45114022493362427,
+      0.11229102313518524,
+      -0.1820121556520462,
+      0.023058010265231133,
+      -0.10155081003904343,
+      -0.04318664222955704,
+      0.11668039858341217,
+      0.03843056783080101,
+      -0.09218569099903107,
+      -0.013754889369010925,
+      -0.17995376884937286,
+      -0.01904706098139286,
+      0.21063017845153809,
+      0.03201309219002724,
+      -0.08707218617200851,
+      0.18653762340545654,
+      -0.04225395992398262,
+      0.01638522371649742,
+      0.044845450669527054,
+      0.04725496843457222,
+      -0.12203315645456314,
+      0.032183654606342316,
+      -0.11969220638275146,
+      -0.02166188880801201,
+      0.01681526005268097,
+      -0.062599778175354,
+      -0.07593213766813278,
+      0.053184498101472855,
+      -0.16300056874752045,
+      0.07954653352499008,
+      0.06156965717673302,
+      0.038579799234867096,
+      -0.07053420692682266,
+      -0.014441097155213356,
+      -0.13439874351024628,
+      0.01630767621099949,
+      0.13098742067813873,
+      -0.2697499990463257,
+      0.28992047905921936,
+      0.14415743947029114,
+      0.04046844318509102,
+      0.19188140332698822,
+      0.052209075540304184,
+      -0.002996832365170121,
+      0.024376166984438896,
+      -0.05083891376852989,
+      -0.09581568837165833,
+      -0.09927970916032791,
+      0.09667627513408661,
+      0.03796237334609032,
+      0.0942629724740982,
+      0.014123267494142056
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921355/Che_Guevara_n8nmln.png"
+  },
+  {
+    "name": "Alexander the Great",
+    "embedding": [
+      -0.12240666151046753,
+      0.145614892244339,
+      0.07547692209482193,
+      -0.03483301028609276,
+      -0.08850565552711487,
+      0.003814574098214507,
+      0.00659434637054801,
+      -0.07239815592765808,
+      0.1966332048177719,
+      -0.08242217451334,
+      0.23455269634723663,
+      0.06304723769426346,
+      -0.1652490198612213,
+      -0.047189876437187195,
+      -0.05862622335553169,
+      0.10966281592845917,
+      -0.17790520191192627,
+      -0.1593683362007141,
+      -0.10067275911569595,
+      -0.06224659085273743,
+      0.07908926904201508,
+      0.116595558822155,
+      -0.053456082940101624,
+      0.07502946257591248,
+      -0.1262807846069336,
+      -0.26914483308792114,
+      -0.04513775557279587,
+      -0.009667915292084217,
+      0.09770175069570541,
+      -0.11605280637741089,
+      0.07569032162427902,
+      0.07597865164279938,
+      -0.18139241635799408,
+      -0.034120384603738785,
+      0.016718102619051933,
+      0.09602247178554535,
+      -0.04951200634241104,
+      -0.055730465799570084,
+      0.23466724157333374,
+      0.0857231616973877,
+      -0.18220016360282898,
+      0.074121855199337,
+      0.06280841678380966,
+      0.4218904376029968,
+      0.1661297082901001,
+      0.01455573458224535,
+      -0.04505845904350281,
+      -0.08393692970275879,
+      0.18136459589004517,
+      -0.3177322447299957,
+      0.06861528754234314,
+      0.2077638953924179,
+      0.11146330833435059,
+      0.09907606989145279,
+      0.10650187730789185,
+      -0.1657283455133438,
+      0.040405698120594025,
+      0.15720388293266296,
+      -0.2083236277103424,
+      0.1502772867679596,
+      0.0019347032066434622,
+      -0.15067502856254578,
+      0.05225233733654022,
+      -0.09982140362262726,
+      0.17580066621303558,
+      0.08391709625720978,
+      -0.09865955263376236,
+      -0.1485951840877533,
+      0.10208207368850708,
+      -0.13521896302700043,
+      -0.16773074865341187,
+      0.09401094168424606,
+      -0.060904160141944885,
+      -0.11401358246803284,
+      -0.361003577709198,
+      0.032694388180971146,
+      0.4344281256198883,
+      0.12906962633132935,
+      -0.23376618325710297,
+      0.03315143659710884,
+      -0.0730862021446228,
+      -0.0818704292178154,
+      0.05721724033355713,
+      0.09628962725400925,
+      -0.10991590470075607,
+      -0.09478037059307098,
+      -0.15306712687015533,
+      -0.020849378779530525,
+      0.26884815096855164,
+      0.07203681766986847,
+      -0.05986940860748291,
+      0.2584255337715149,
+      0.047182463109493256,
+      -0.0425582192838192,
+      0.022082161158323288,
+      0.05989467725157738,
+      -0.18417859077453613,
+      -0.02767120860517025,
+      -0.14304044842720032,
+      -0.10378921777009964,
+      0.01192585937678814,
+      -0.1154855415225029,
+      -0.027767617255449295,
+      0.1501741111278534,
+      -0.27997708320617676,
+      0.24445778131484985,
+      0.03219103813171387,
+      -0.011634974740445614,
+      0.024835633113980293,
+      0.018306374549865723,
+      -0.13970059156417847,
+      0.04079710692167282,
+      0.16776953637599945,
+      -0.2602480351924896,
+      0.28396087884902954,
+      0.1473855823278427,
+      0.08355910331010818,
+      0.16072200238704681,
+      0.11588362604379654,
+      0.05215595290064812,
+      -0.0664922446012497,
+      -0.017556119710206985,
+      -0.07839268445968628,
+      -0.13173727691173553,
+      0.02625044621527195,
+      -0.05041280761361122,
+      0.07888396829366684,
+      0.06310583651065826
+    ],
+    "url": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921354/alexander_the_great_mcdwpy.png"
+  }
+]
+
+
+
+# ==== requirements.txt ====
+
+# Core
+Django==5.1.6
+gunicorn==23.0.0
+whitenoise==6.9.0
+psycopg2-binary==2.9.10
+
+# Environment + security
+django-environ==0.12.0
+cryptography==44.0.3
+
+# Auth + social login
+django-allauth==65.6.0
+django-crispy-forms==2.3
+crispy-bootstrap5==2024.10
+django-extensions==4.1
+
+# Media + storage
+cloudinary==1.44.0
+django-cloudinary-storage==0.3.0
+Pillow==10.0.0
+
+# APIs + HTTP
+stripe==12.0.1
+openai==1.78.1
+httpx==0.28.1
+requests==2.32.3
+urllib3==2.4.0
+certifi==2025.4.26
+idna==3.10
+charset-normalizer==3.4.2
+
+djangorestframework==3.16.0
+
+# Type + utility
+pydantic>=2.6,<2.10
+typing_extensions==4.13.0
+typing-inspection==0.4.0
+pytz==2025.2
+tzdata==2025.2
+
+# Optional: Data tools (remove if not used in chat utils)
+numpy==2.2.4
+pandas==2.2.3
+pandas-stubs==2.2.3.250308
+python-dateutil==2.9.0.post0
+tablib==3.8.0
+openpyxl==3.1.5
+
+PyJWT==2.10.1
+
+face-recognition==1.3.0
+dlib==20.0.0
+cmake==4.0.2
+
+django-cors-headers==4.6.0
+gradio-client==1.10.3
+
+
+
+
+# ==== requirements-dev.txt ====
+
+-r requirements.txt
+
+flake8==7.2.0
+flake8-bandit==4.1.1
+mypy==1.15.0
+mypy_extensions==1.1.0
+pytest==8.3.5
+pytest-django==4.11.1
+safety==3.5.0
+safety-schemas==0.0.14
+
+
+
+
+# ==== manage.py ====
+
+#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "django_project.settings.dev")
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+# ==== Dockerfile ====
+
+# Based on official ageitgey/face_recognition Dockerfile
+FROM python:3.10.3-slim-bullseye
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies (based on official ageitgey Dockerfile)
+RUN apt-get -y update
+RUN apt-get install -y --fix-missing \
+    build-essential \
+    cmake \
+    gfortran \
+    git \
+    wget \
+    curl \
+    graphicsmagick \
+    libgraphicsmagick1-dev \
+    libatlas-base-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libgtk2.0-dev \
+    libjpeg-dev \
+    liblapack-dev \
+    libswscale-dev \
+    pkg-config \
+    python3-dev \
+    python3-numpy \
+    software-properties-common \
+    libpq-dev \
+    zip \
+    && apt-get clean && rm -rf /tmp/* /var/tmp/*
+
+# Build and install dlib from source (CRITICAL - this is the official way)
+RUN cd ~ && \
+    mkdir -p dlib && \
+    git clone -b 'v19.9' --single-branch https://github.com/davisking/dlib.git dlib/ && \
+    cd dlib/ && \
+    python3 setup.py install --yes USE_AVX_INSTRUCTIONS
+
+# Set work directory
+WORKDIR /app
+
+# Copy requirements and install Python packages
+COPY requirements.txt /app/
+RUN pip3 install --upgrade pip wheel
+
+# Install face_recognition and other Python packages
+RUN pip3 install face_recognition
+RUN pip3 install -r requirements.txt
+
+# Set dummy environment variables for build time
+ENV DJANGO_SETTINGS_MODULE=django_project.settings.base
+ENV DJANGO_SECRET_KEY=build-time-secret-key
+ENV DATABASE_URL=sqlite:///tmp/build.db
+ENV CLOUDINARY_CLOUD_NAME=dummy
+ENV CLOUDINARY_API_KEY=dummy
+ENV CLOUDINARY_API_SECRET=dummy
+ENV OPENAI_API_KEY=dummy
+
+# Copy project
+COPY . /app/
+
+# Create media directories
+RUN mkdir -p /app/media/uploads/selfies
+RUN mkdir -p /app/staticfiles
+
+# Try to collect static files (skip if it fails)
+RUN python3 manage.py collectstatic --noinput || echo "Collectstatic failed, continuing..."
+
+# Create non-root user for security
+RUN adduser --disabled-password --gecos '' appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD python3 -c "import requests; requests.get('http://localhost:8000/health/', timeout=10)" || exit 1
+
+# Default command
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "300", "django_project.wsgi:application"]
+
+
+
+# ==== docker-compose.yml ====
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: faceswap_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Django Backend
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True  # This is critical!
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,backend,0.0.0.0
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_FACESWAP_URL=https://mnraynor90-facefusionfastapi.hf.space
+    volumes:
+      - .:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
+
+
+
+# ==== fly.toml ====
+
+# fly.toml app configuration file generated for ai-face-swap-app on 2025-06-17T18:20:43-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'ai-face-swap-app'
+primary_region = 'ewr'
+console_command = '/code/manage.py shell'
+
+[build]
+
+[deploy]
+  release_command = 'python manage.py migrate --noinput'
+
+[env]
+  PORT = '8000'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '2gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[[statics]]
+  guest_path = '/code/static'
+  url_prefix = '/static/'
+
+

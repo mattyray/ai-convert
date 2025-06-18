@@ -3,7 +3,6 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from .models import GeneratedImage
 from .face_match import match_face
-from faceswap.huggingface_utils import FaceFusionClient
 import tempfile
 import base64
 from django.core.files.base import ContentFile
@@ -12,6 +11,8 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 import io
 import time
 import random
+import requests
+import json
 
 # Map historical figures to their Cloudinary URLs
 HISTORICAL_FIGURES = {
@@ -35,49 +36,148 @@ HISTORICAL_FIGURES = {
     "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921354/alexander_the_great_mcdwpy.png",
 }
 
-class GenerateImageView(APIView):
-    permission_classes = [permissions.AllowAny]
+HUGGINGFACE_SPACE_URL = "https://mnraynor90-facefusionfastapi.hf.space"
 
-    def perform_face_swap_with_retry(self, source_mock, target_mock, match_name, max_retries=4):
-        """
-        Perform face swap with exponential backoff retry logic
-        """
-        fusion_client = FaceFusionClient()
-        
-        for attempt in range(max_retries):
-            try:
-                print(f"🔄 Face swap attempt {attempt + 1}/{max_retries} for {match_name}")
-                result_image_data = fusion_client.swap_faces(source_mock, target_mock)
-                print(f"✅ Face swap succeeded on attempt {attempt + 1}: {len(result_image_data)} bytes")
-                return result_image_data
+def get_image_url(image_field):
+    """Convert Django ImageField to accessible URL"""
+    try:
+        if hasattr(image_field, 'url'):
+            image_url = image_field.url
+            
+            if image_url.startswith('http'):
+                return image_url
+            
+            if image_url.startswith('/') and hasattr(image_field, 'name'):
+                try:
+                    import cloudinary.utils
+                    cloudinary_url = cloudinary.utils.cloudinary_url(image_field.name)[0]
+                    print(f"✅ Using Cloudinary URL: {cloudinary_url}")
+                    return cloudinary_url
+                except Exception as e:
+                    print(f"⚠️ Cloudinary failed: {e}")
+                    # Fallback to absolute URL
+                    from django.conf import settings
+                    base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
+                    return f"{base_url}{image_url}"
+            
+            return image_url
+        else:
+            raise Exception("Invalid image field")
+    except Exception as e:
+        raise Exception(f"Failed to get image URL: {str(e)}")
+
+def perform_face_swap_direct_http(source_url, target_url, max_retries=4):
+    """
+    Use direct HTTP POST like the working test-url endpoint
+    """
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 Direct HTTP face swap attempt {attempt + 1}/{max_retries}")
+            print(f"  Source: {source_url[:80]}...")
+            print(f"  Target: {target_url[:80]}...")
+            
+            # Use the same direct HTTP approach as test-url
+            response = requests.post(
+                f"{HUGGINGFACE_SPACE_URL}/run/predict",
+                headers={
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "data": [source_url, target_url]
+                },
+                timeout=120
+            )
+            
+            print(f"📋 HTTP Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                print(f"📋 Response data keys: {result.keys() if isinstance(result, dict) else 'Not a dict'}")
                 
-            except Exception as e:
-                error_msg = str(e).lower()
+                # Handle the response format
+                if "data" in result and isinstance(result["data"], list) and len(result["data"]) >= 1:
+                    image_data = result["data"][0]
+                    
+                    # Handle base64 image data
+                    if isinstance(image_data, str) and image_data.startswith("data:image"):
+                        # Extract base64 data
+                        base64_data = image_data.split(",")[1]
+                        image_bytes = base64.b64decode(base64_data)
+                        print(f"✅ Got base64 image: {len(image_bytes)} bytes")
+                        return image_bytes
+                    
+                    # Handle file path or other formats
+                    elif isinstance(image_data, dict) and "path" in image_data:
+                        # This would need additional handling for file paths
+                        raise Exception("File path response not yet supported in direct HTTP mode")
+                    
+                    else:
+                        raise Exception(f"Unexpected image data format: {type(image_data)}")
+                else:
+                    raise Exception(f"Invalid response format: {result}")
+            
+            else:
+                error_msg = response.text
+                print(f"❌ HTTP error {response.status_code}: {error_msg}")
                 
-                # Check if it's a rate limiting error
-                if any(keyword in error_msg for keyword in [
+                # Check for rate limiting
+                if any(keyword in error_msg.lower() for keyword in [
                     'slow down', 'too many', 'rate limit', 'concurrent requests',
                     'quota exceeded', 'throttled', 'busy'
                 ]):
-                    if attempt < max_retries - 1:  # Don't wait on the last attempt
-                        # Exponential backoff with jitter
-                        base_delay = 2 ** attempt  # 1s, 2s, 4s, 8s
-                        jitter = random.uniform(0.5, 1.5)  # Add randomness
+                    if attempt < max_retries - 1:
+                        # Exponential backoff with jitter for rate limits
+                        base_delay = 3 ** attempt  # 1s, 3s, 9s, 27s
+                        jitter = random.uniform(0.7, 1.3)
                         delay = base_delay * jitter
                         
                         print(f"⏳ Rate limited. Waiting {delay:.1f}s before retry {attempt + 2}...")
                         time.sleep(delay)
                         continue
                     else:
-                        print(f"❌ Max retries reached. Final error: {e}")
-                        raise Exception(f"Face swap failed after {max_retries} attempts due to rate limiting. Please try again in a few minutes.")
+                        raise Exception("Rate limited after all retries. Please try again in a few minutes.")
                 else:
-                    # Non-rate-limiting error, don't retry
-                    print(f"❌ Non-retryable error: {e}")
-                    raise e
+                    raise Exception(f"HTTP error {response.status_code}: {error_msg}")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Request error on attempt {attempt + 1}: {e}")
+            if attempt < max_retries - 1:
+                delay = 2 + random.uniform(0, 2)
+                print(f"⏳ Retrying in {delay:.1f}s...")
+                time.sleep(delay)
+                continue
+            else:
+                raise Exception(f"Face swap failed after {max_retries} attempts. Last error: {e}")
         
-        # Should never reach here, but just in case
-        raise Exception(f"Face swap failed after {max_retries} attempts")
+        except Exception as e:
+            print(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
+            if attempt < max_retries - 1:
+                delay = 2 + random.uniform(0, 2)
+                print(f"⏳ Retrying in {delay:.1f}s...")
+                time.sleep(delay)
+                continue
+            else:
+                raise e
+    
+    raise Exception(f"Face swap failed after {max_retries} attempts")
+
+class GenerateImageView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def perform_face_swap_with_retry(self, source_mock, target_mock, match_name, max_retries=4):
+        """
+        Perform face swap using direct HTTP (like test-url endpoint)
+        """
+        # Get URLs from mock objects
+        source_url = get_image_url(source_mock)
+        target_url = get_image_url(target_mock)
+        
+        print(f"🔄 Starting face swap for {match_name}")
+        print(f"  Source URL: {source_url}")
+        print(f"  Target URL: {target_url}")
+        
+        # Use direct HTTP approach (same as working test-url)
+        return perform_face_swap_direct_http(source_url, target_url, max_retries)
 
     def post(self, request):
         selfie = request.FILES.get("selfie")
@@ -143,7 +243,7 @@ class GenerateImageView(APIView):
 
             print(f"🔄 Starting face swap: {temp_image.selfie.url} -> {historical_image_url}")
 
-            # Step 4: Perform face swap with retry logic
+            # Step 4: Perform face swap with retry logic (NOW USING DIRECT HTTP)
             result_image_data = self.perform_face_swap_with_retry(
                 source_mock, target_mock, match_name
             )

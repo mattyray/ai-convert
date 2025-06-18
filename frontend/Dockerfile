@@ -1,45 +1,59 @@
-# syntax = docker/dockerfile:1
+# backend/Dockerfile
 
-# Adjust NODE_VERSION as desired
-ARG NODE_VERSION=23.0.0
-FROM node:${NODE_VERSION}-slim AS base
+FROM python:3.10.3-slim-bullseye
 
-LABEL fly_launch_runtime="Vite"
+# Avoid prompts during install
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Vite app lives here
+# Install system dependencies only once
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    gfortran \
+    git \
+    libatlas-base-dev \
+    libjpeg-dev \
+    liblapack-dev \
+    libswscale-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libgtk2.0-dev \
+    libpq-dev \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-create working dir
 WORKDIR /app
 
-# Set production environment
-ENV NODE_ENV="production"
+# 👇 Copy and install only requirements first (layer cache win)
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir --upgrade pip wheel && \
+    pip install --no-cache-dir numpy && \
+    pip install --no-cache-dir dlib && \
+    pip install --no-cache-dir face-recognition && \
+    pip install --no-cache-dir -r requirements.txt
 
+# Copy entire project
+COPY . /app/
 
-# Throw-away build stage to reduce size of final image
-FROM base AS build
+# Create necessary dirs for media/static
+RUN mkdir -p /app/media/uploads/selfies /app/staticfiles
 
-# Install packages needed to build node modules
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3
+# Optional: run collectstatic here if needed
+# RUN python manage.py collectstatic --noinput || echo "Skipping collectstatic"
 
-# Install node modules
-COPY package-lock.json package.json ./
-RUN npm ci --include=dev
+# Non-root user
+RUN adduser --disabled-password --gecos '' appuser && \
+    chown -R appuser:appuser /app
+USER appuser
 
-# Copy application code
-COPY . .
+EXPOSE 8000
 
-# Build application
-RUN npm run build
+# Health check (optional)
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD python3 -c "import requests; requests.get('http://localhost:8000/health/', timeout=10)" || exit 1
 
-# Remove development dependencies
-RUN npm prune --omit=dev
-
-
-# Final stage for app image
-FROM nginx
-
-# Copy built application
-COPY --from=build /app/dist /usr/share/nginx/html
-
-# Start the server by default, this can be overwritten at runtime
-EXPOSE 80
-CMD [ "/usr/sbin/nginx", "-g", "daemon off;" ]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "300", "django_project.wsgi:application"]

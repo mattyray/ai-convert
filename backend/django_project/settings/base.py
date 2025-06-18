@@ -238,7 +238,7 @@ REST_FRAMEWORK = {
 }
 
 HUGGINGFACE_FACESWAP_URL = env('HUGGINGFACE_FACESWAP_URL', 
-    default='https://mnraynor90-facefusionfastapi.hf.space')
+    default='https://mnraynor90-facefusionfastapi-private.hf.space')
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server

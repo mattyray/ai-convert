@@ -3,13 +3,15 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from .models import GeneratedImage
 from .face_match import match_face
-from faceswap.huggingface_utils import FaceFusionClient  # Import your working face swap client
+from faceswap.huggingface_utils import FaceFusionClient
 import tempfile
 import base64
 from django.core.files.base import ContentFile
 import os
 from django.core.files.uploadedfile import InMemoryUploadedFile
 import io
+import time
+import random
 
 # Map historical figures to their Cloudinary URLs
 HISTORICAL_FIGURES = {
@@ -36,6 +38,47 @@ HISTORICAL_FIGURES = {
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
 
+    def perform_face_swap_with_retry(self, source_mock, target_mock, match_name, max_retries=4):
+        """
+        Perform face swap with exponential backoff retry logic
+        """
+        fusion_client = FaceFusionClient()
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"🔄 Face swap attempt {attempt + 1}/{max_retries} for {match_name}")
+                result_image_data = fusion_client.swap_faces(source_mock, target_mock)
+                print(f"✅ Face swap succeeded on attempt {attempt + 1}: {len(result_image_data)} bytes")
+                return result_image_data
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                # Check if it's a rate limiting error
+                if any(keyword in error_msg for keyword in [
+                    'slow down', 'too many', 'rate limit', 'concurrent requests',
+                    'quota exceeded', 'throttled', 'busy'
+                ]):
+                    if attempt < max_retries - 1:  # Don't wait on the last attempt
+                        # Exponential backoff with jitter
+                        base_delay = 2 ** attempt  # 1s, 2s, 4s, 8s
+                        jitter = random.uniform(0.5, 1.5)  # Add randomness
+                        delay = base_delay * jitter
+                        
+                        print(f"⏳ Rate limited. Waiting {delay:.1f}s before retry {attempt + 2}...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        print(f"❌ Max retries reached. Final error: {e}")
+                        raise Exception(f"Face swap failed after {max_retries} attempts due to rate limiting. Please try again in a few minutes.")
+                else:
+                    # Non-rate-limiting error, don't retry
+                    print(f"❌ Non-retryable error: {e}")
+                    raise e
+        
+        # Should never reach here, but just in case
+        raise Exception(f"Face swap failed after {max_retries} attempts")
+
     def post(self, request):
         selfie = request.FILES.get("selfie")
         if not selfie:
@@ -59,8 +102,10 @@ class GenerateImageView(APIView):
             charset=selfie.charset,
         )
 
+        temp_image = None
         try:
             # Step 1: Match face with historical figures
+            print("🔍 Starting face matching...")
             match_result = match_face(tmp_path)
             if "error" in match_result:
                 return Response(match_result, status=status.HTTP_400_BAD_REQUEST)
@@ -82,7 +127,7 @@ class GenerateImageView(APIView):
                 user=request.user if request.user.is_authenticated else None,
                 prompt=f"You as {match_name}",
                 match_name=match_name,
-                selfie=selfie_for_model,  # Use the fresh file object
+                selfie=selfie_for_model,
                 output_url="",
             )
 
@@ -98,9 +143,10 @@ class GenerateImageView(APIView):
 
             print(f"🔄 Starting face swap: {temp_image.selfie.url} -> {historical_image_url}")
 
-            # Step 4: Perform face swap using your working client
-            fusion_client = FaceFusionClient()
-            result_image_data = fusion_client.swap_faces(source_mock, target_mock)
+            # Step 4: Perform face swap with retry logic
+            result_image_data = self.perform_face_swap_with_retry(
+                source_mock, target_mock, match_name
+            )
 
             print(f"✅ Face swap completed: {len(result_image_data)} bytes")
 
@@ -126,10 +172,11 @@ class GenerateImageView(APIView):
         except Exception as e:
             print(f"❌ Error in GenerateImageView: {str(e)}")
             # Clean up on error
-            try:
-                temp_image.delete()
-            except:
-                pass
+            if temp_image:
+                try:
+                    temp_image.delete()
+                except:
+                    pass
             
             return Response({
                 "error": f"Face processing failed: {str(e)}"

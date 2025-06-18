@@ -1,68 +1,63 @@
-# Use Python 3.12 slim image
-FROM python:3.12-slim
+# Based on official ageitgey/face_recognition Dockerfile
+FROM python:3.10.3-slim-bullseye
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Set Django settings module for build
-ENV DJANGO_SETTINGS_MODULE=django_project.settings.base
+# Install system dependencies (based on official ageitgey Dockerfile)
+RUN apt-get -y update
+RUN apt-get install -y --fix-missing \
+    build-essential \
+    cmake \
+    gfortran \
+    git \
+    wget \
+    curl \
+    graphicsmagick \
+    libgraphicsmagick1-dev \
+    libatlas-base-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libgtk2.0-dev \
+    libjpeg-dev \
+    liblapack-dev \
+    libswscale-dev \
+    pkg-config \
+    python3-dev \
+    python3-numpy \
+    software-properties-common \
+    libpq-dev \
+    zip \
+    && apt-get clean && rm -rf /tmp/* /var/tmp/*
+
+# Build and install dlib from source (CRITICAL - this is the official way)
+RUN cd ~ && \
+    mkdir -p dlib && \
+    git clone -b 'v19.9' --single-branch https://github.com/davisking/dlib.git dlib/ && \
+    cd dlib/ && \
+    python3 setup.py install --yes USE_AVX_INSTRUCTIONS
+
+# Set work directory
+WORKDIR /app
+
+# Copy requirements and install Python packages
+COPY requirements.txt /app/
+RUN pip3 install --upgrade pip wheel
+
+# Install face_recognition and other Python packages
+RUN pip3 install face_recognition
+RUN pip3 install -r requirements.txt
 
 # Set dummy environment variables for build time
+ENV DJANGO_SETTINGS_MODULE=django_project.settings.base
 ENV DJANGO_SECRET_KEY=build-time-secret-key
 ENV DATABASE_URL=sqlite:///tmp/build.db
 ENV CLOUDINARY_CLOUD_NAME=dummy
 ENV CLOUDINARY_API_KEY=dummy
 ENV CLOUDINARY_API_SECRET=dummy
 ENV OPENAI_API_KEY=dummy
-
-# Install system dependencies required for face-recognition and dlib
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    libopenblas-dev \
-    liblapack-dev \
-    libx11-dev \
-    libgtk-3-dev \
-    python3-dev \
-    python3-pip \
-    git \
-    wget \
-    pkg-config \
-    libpq-dev \
-    gcc \
-    g++ \
-    libatlas-base-dev \
-    gfortran \
-    libjpeg-dev \
-    libpng-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set work directory
-WORKDIR /app
-
-# Copy requirements first for better caching
-COPY requirements.txt /app/
-
-# Upgrade pip and install wheel
-RUN pip install --no-cache-dir --upgrade pip wheel
-
-# Install Python dependencies in stages for better debugging
-# First install numpy (required for dlib)
-RUN pip install --no-cache-dir numpy
-
-# Install dlib separately with verbose output
-RUN pip install --no-cache-dir dlib --verbose
-
-# Install face recognition
-RUN pip install --no-cache-dir face-recognition
-
-# Install face recognition models (CRITICAL FIX)
-RUN pip install --no-cache-dir git+https://github.com/ageitgey/face_recognition_models
-
-# Install remaining requirements
-RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy project
 COPY . /app/
@@ -72,7 +67,7 @@ RUN mkdir -p /app/media/uploads/selfies
 RUN mkdir -p /app/staticfiles
 
 # Try to collect static files (skip if it fails)
-RUN python manage.py collectstatic --noinput || echo "Collectstatic failed, continuing..."
+RUN python3 manage.py collectstatic --noinput || echo "Collectstatic failed, continuing..."
 
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser
@@ -84,7 +79,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8000/health/', timeout=10)" || exit 1
+  CMD python3 -c "import requests; requests.get('http://localhost:8000/health/', timeout=10)" || exit 1
 
 # Default command
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "300", "django_project.wsgi:application"]

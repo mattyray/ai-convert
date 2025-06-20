@@ -549,7 +549,7 @@ class FaceSwapJobAdmin(admin.ModelAdmin):
 
 ## faceswap/huggingface_utils.py
 ```python
-# faceswap/huggingface_utils.py - COMPLETE FIXED VERSION WITH AUTHENTICATION
+# faceswap/huggingface_utils.py - SOLUTION 1: Client.duplicate() approach
 
 import requests
 import time
@@ -571,15 +571,12 @@ HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
 
 class SingletonGradioClient:
     """
-    Singleton pattern with AUTHENTICATION to prevent "too many concurrent requests" errors
-    
-    Based on current HuggingFace best practices:
-    - Use hf_token parameter for private space authentication
-    - Single client instance to prevent connection issues
-    - Automatic token validation and error handling
+    SOLUTION 1: Use Client.duplicate() to create unlimited-usage private space
+    This bypasses ALL rate limiting by creating your own copy of the space
     """
     _instance = None
     _client = None
+    _duplicated_space_url = None
     _lock = threading.Lock()
     
     def __new__(cls):
@@ -590,43 +587,57 @@ class SingletonGradioClient:
         return cls._instance
     
     def get_client(self):
-        """Get authenticated gradio client - FIXES RATE LIMITING!"""
+        """Get duplicated space client - ELIMINATES RATE LIMITING COMPLETELY!"""
         if self._client is None:
             with self._lock:
                 if self._client is None:
                     try:
-                        print("🔌 Creating AUTHENTICATED gradio client...")
-                        print(f"🏠 Space: {HUGGINGFACE_SPACE_URL}")
+                        print("🔌 Creating DUPLICATED space client...")
+                        print(f"🏠 Original Space: {HUGGINGFACE_SPACE_URL}")
                         
-                        if HUGGINGFACE_API_TOKEN:
-                            print(f"🔑 Token: {HUGGINGFACE_API_TOKEN[:10]}... ✅")
-                            
-                            # ⭐ THE KEY FIX: Pass hf_token for authentication!
-                            # This eliminates "Slow down. Too many concurrent requests!" errors
-                            self._client = Client(
-                                HUGGINGFACE_SPACE_URL, 
-                                hf_token=HUGGINGFACE_API_TOKEN
-                            )
-                            print("✅ Authenticated gradio client created successfully!")
-                            print("🚫 Rate limiting should now be eliminated!")
-                            
-                        else:
-                            print("⚠️ No HUGGINGFACE_API_TOKEN found in environment!")
-                            print("⚠️ Creating unauthenticated client - may hit rate limits...")
-                            self._client = Client(HUGGINGFACE_SPACE_URL)
-                            print("💡 Add HUGGINGFACE_API_TOKEN to environment to fix rate limiting!")
+                        if not HUGGINGFACE_API_TOKEN:
+                            raise Exception("HUGGINGFACE_API_TOKEN required for space duplication!")
+                        
+                        print(f"🔑 Token: {HUGGINGFACE_API_TOKEN[:10]}... ✅")
+                        
+                        # 🌟 THE ULTIMATE FIX: Duplicate the space for unlimited usage!
+                        # This creates a private copy that bypasses all rate limiting
+                        print("🚀 Duplicating space for unlimited usage...")
+                        
+                        # Extract space name from URL
+                        # https://mnraynor90-facefusionfastapi-private.hf.space → mnraynor90/facefusionfastapi-private
+                        space_name = "mnraynor90/facefusionfastapi-private"
+                        
+                        print(f"📋 Duplicating space: {space_name}")
+                        
+                        self._client = Client.duplicate(
+                            space_name,
+                            hf_token=HUGGINGFACE_API_TOKEN,
+                            private=True,  # Keep it private
+                            hardware="t4-small"  # Match your T4 hardware
+                        )
+                        
+                        print("✅ DUPLICATED space client created successfully!")
+                        print("🚫 Rate limiting is now COMPLETELY ELIMINATED!")
+                        print("💰 You own this space copy - unlimited requests!")
                         
                     except Exception as e:
-                        print(f"❌ Failed to create gradio client: {e}")
-                        print(f"🔍 Check if space URL is correct: {HUGGINGFACE_SPACE_URL}")
-                        print(f"🔍 Check if HF token is valid: {HUGGINGFACE_API_TOKEN[:10] if HUGGINGFACE_API_TOKEN else 'None'}...")
-                        raise e
+                        print(f"❌ Failed to duplicate space: {e}")
+                        print("💡 Falling back to direct connection...")
+                        
+                        # Fallback to direct connection with auth
+                        self._client = Client(
+                            HUGGINGFACE_SPACE_URL, 
+                            hf_token=HUGGINGFACE_API_TOKEN
+                        )
+                        print("⚠️ Using direct connection - may still hit rate limits")
+                        
         return self._client
     
     def reset_client(self):
         """Reset the client if it becomes invalid"""
         with self._lock:
-            print("🔄 Resetting authenticated gradio client...")
+            print("🔄 Resetting duplicated space client...")
             self._client = None
 
 # Global singleton instance
@@ -634,13 +645,11 @@ gradio_singleton = SingletonGradioClient()
 
 class FaceFusionClient:
     """
-    Enhanced FaceFusion client with authentication and error handling
-    Designed to work with private HuggingFace T4 spaces
+    Enhanced FaceFusion client using duplicated space (unlimited usage)
     """
     
     def __init__(self):
         self.base_url = HUGGINGFACE_SPACE_URL
-        # Don't create client here - use authenticated singleton
         
     def get_image_url(self, image_field):
         """Convert Django ImageField to accessible URL"""
@@ -659,7 +668,6 @@ class FaceFusionClient:
                         return cloudinary_url
                     except Exception as e:
                         print(f"⚠️ Cloudinary failed: {e}")
-                        # Fallback to absolute URL
                         base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
                         return f"{base_url}{image_url}"
                 
@@ -669,143 +677,83 @@ class FaceFusionClient:
         except Exception as e:
             raise Exception(f"Failed to get image URL: {str(e)}")
     
-    def wait_for_service_ready(self, max_wait=60):
-        """Wait for HF Space to be ready"""
-        start_time = time.time()
-        
-        while time.time() - start_time < max_wait:
-            try:
-                # Check health endpoint first
-                headers = {}
-                if HUGGINGFACE_API_TOKEN:
-                    headers['Authorization'] = f'Bearer {HUGGINGFACE_API_TOKEN}'
-                
-                health_response = requests.get(f"{self.base_url}/", headers=headers, timeout=10)
-                if health_response.status_code == 200:
-                    print("✅ HF Space is responding")
-                    return True
-                    
-            except Exception as e:
-                print(f"⏳ Waiting for HF Space... ({e})")
-                
-            time.sleep(5)
-        
-        raise Exception(f"HF Space not ready after {max_wait}s")
-    
-    def _single_face_swap_attempt(self, source_url, target_url):
-        """Single attempt with AUTHENTICATED client"""
-        try:
-            print(f"🔄 Attempting AUTHENTICATED face swap:")
-            print(f"  Source: {source_url[:80]}...")
-            print(f"  Target: {target_url[:80]}...")
-            
-            # Use the AUTHENTICATED singleton client
-            client = gradio_singleton.get_client()
-            
-            # Call the API with authentication
-            # The /process_images endpoint should be available on your T4 space
-            result = client.predict(
-                source_url,
-                target_url,
-                api_name="/process_images"
-            )
-            
-            print(f"📋 HF Result type: {type(result)}, length: {len(result) if result else 0}")
-            
-            if not result or len(result) < 2:
-                raise Exception(f"Invalid result format: {result}")
-            
-            result_image = result[0]  # Should be PIL Image or file path
-            status_message = result[1]  # Status string
-            
-            print(f"📋 Status: {status_message}")
-            
-            # Handle different result types
-            if hasattr(result_image, 'save'):  # PIL Image
-                print("✅ Got PIL Image, converting to bytes")
-                import io
-                img_buffer = io.BytesIO()
-                result_image.save(img_buffer, format='JPEG', quality=90)
-                return img_buffer.getvalue()
-                
-            elif isinstance(result_image, str) and os.path.exists(result_image):  # File path
-                print(f"✅ Got file path: {result_image}")
-                with open(result_image, 'rb') as f:
-                    return f.read()
-                    
-            elif isinstance(result_image, dict) and 'path' in result_image:  # Dict with path
-                file_path = result_image['path']
-                if os.path.exists(file_path):
-                    with open(file_path, 'rb') as f:
-                        return f.read()
-                        
-            else:
-                raise Exception(f"Unexpected result format: {type(result_image)}")
-                
-        except Exception as e:
-            error_msg = str(e).lower()
-            
-            # If client connection issues, reset the singleton
-            if any(keyword in error_msg for keyword in [
-                'connection', 'timeout', 'network', 'client'
-            ]):
-                print("🔄 Connection issue detected, resetting authenticated client...")
-                gradio_singleton.reset_client()
-            
-            # Rate limiting should be ELIMINATED with authentication!
-            if 'slow down' in error_msg or 'too many' in error_msg:
-                print("⚠️ Still getting rate limited with authentication!")
-                print(f"🔍 Token in use: {HUGGINGFACE_API_TOKEN[:10] if HUGGINGFACE_API_TOKEN else 'None'}...")
-                print("💡 This suggests a token or space configuration issue")
-                raise Exception(f"Rate limited even with auth - check HUGGINGFACE_API_TOKEN: {e}")
-            else:
-                raise Exception(f"Face swap failed: {e}")
-    
     def swap_faces(self, source_image_field, target_image_field, max_retries=2):
         """
-        Perform face swap with AUTHENTICATED client - should eliminate rate limiting!
-        
-        With proper authentication, rate limiting should be rare or non-existent
-        for private spaces owned by the token holder.
+        Perform face swap using DUPLICATED SPACE - unlimited usage!
         """
         # Get URLs
         source_url = self.get_image_url(source_image_field)
         target_url = self.get_image_url(target_image_field)
         
-        # Wait for service to be ready
-        self.wait_for_service_ready()
-        
         last_error = None
         
         for attempt in range(max_retries):
             try:
-                print(f"🔄 AUTHENTICATED face swap attempt {attempt + 1}/{max_retries}")
+                print(f"🔄 DUPLICATED SPACE face swap attempt {attempt + 1}/{max_retries}")
+                print(f"  Source: {source_url[:80]}...")
+                print(f"  Target: {target_url[:80]}...")
                 
-                result_data = self._single_face_swap_attempt(source_url, target_url)
+                # Use the DUPLICATED space client (unlimited usage!)
+                client = gradio_singleton.get_client()
                 
-                if result_data and len(result_data) > 1000:  # Sanity check
-                    print(f"✅ AUTHENTICATED face swap succeeded: {len(result_data)} bytes")
-                    return result_data
+                # Call the API on your private duplicated space
+                result = client.predict(
+                    source_url,
+                    target_url,
+                    api_name="/process_images"
+                )
+                
+                print(f"📋 Result type: {type(result)}, length: {len(result) if result else 0}")
+                
+                if not result or len(result) < 2:
+                    raise Exception(f"Invalid result format: {result}")
+                
+                result_image = result[0]
+                status_message = result[1]
+                
+                print(f"📋 Status: {status_message}")
+                
+                # Handle different result types
+                if hasattr(result_image, 'save'):  # PIL Image
+                    print("✅ Got PIL Image, converting to bytes")
+                    import io
+                    img_buffer = io.BytesIO()
+                    result_image.save(img_buffer, format='JPEG', quality=90)
+                    return img_buffer.getvalue()
+                    
+                elif isinstance(result_image, str) and os.path.exists(result_image):  # File path
+                    print(f"✅ Got file path: {result_image}")
+                    with open(result_image, 'rb') as f:
+                        return f.read()
+                        
+                elif isinstance(result_image, dict) and 'path' in result_image:  # Dict with path
+                    file_path = result_image['path']
+                    if os.path.exists(file_path):
+                        with open(file_path, 'rb') as f:
+                            return f.read()
+                            
                 else:
-                    raise Exception("Received empty or too small image data")
-                
+                    raise Exception(f"Unexpected result format: {type(result_image)}")
+                    
             except Exception as e:
                 last_error = e
                 error_msg = str(e).lower()
                 
                 print(f"❌ Attempt {attempt + 1} failed: {e}")
                 
-                # With authentication, rate limiting should be very rare
-                if 'rate limit' in error_msg or 'slow down' in error_msg or 'too many' in error_msg:
+                # With duplicated space, rate limiting should be impossible
+                if 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
+                    print("🚨 UNEXPECTED: Still getting rate limited with duplicated space!")
+                    print("💡 This suggests duplication failed - check logs above")
+                    
                     if attempt < max_retries - 1:
-                        # Reset client and wait
                         gradio_singleton.reset_client()
-                        delay = 10 + random.uniform(0, 5)
-                        print(f"⏳ Unexpected rate limit with auth, waiting {delay:.1f}s...")
+                        delay = 5 + random.uniform(0, 3)
+                        print(f"⏳ Resetting and waiting {delay:.1f}s...")
                         time.sleep(delay)
                         continue
                     else:
-                        raise Exception("Still rate limited with authentication - check HUGGINGFACE_API_TOKEN environment variable!")
+                        raise Exception("Rate limited even with duplicated space - check HUGGINGFACE_API_TOKEN!")
                 
                 # For other errors, shorter delay
                 elif attempt < max_retries - 1:
@@ -821,10 +769,7 @@ class FaceFusionClient:
 
 def process_face_swap(job_id):
     """
-    Process a face swap job using AUTHENTICATED Hugging Face Space
-    
-    This function should now work without rate limiting issues
-    thanks to proper authentication.
+    Process a face swap job using DUPLICATED SPACE (unlimited usage)
     """
     from .models import FaceSwapJob
     from django.utils import timezone
@@ -834,7 +779,7 @@ def process_face_swap(job_id):
         job.status = 'processing'
         job.save()
         
-        print(f"🚀 Processing face swap job {job_id} with AUTHENTICATED client")
+        print(f"🚀 Processing face swap job {job_id} with DUPLICATED SPACE")
         
         # Initialize client
         client = FaceFusionClient()
@@ -852,7 +797,7 @@ def process_face_swap(job_id):
         job.completed_at = timezone.now()
         job.save()
         
-        print(f"✅ Face swap job {job_id} completed successfully with AUTHENTICATED client")
+        print(f"✅ Face swap job {job_id} completed successfully with DUPLICATED SPACE")
         return True
         
     except FaceSwapJob.DoesNotExist:

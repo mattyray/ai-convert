@@ -237,8 +237,13 @@ REST_FRAMEWORK = {
     ]
 }
 
-HUGGINGFACE_FACESWAP_URL = env('HUGGINGFACE_FACESWAP_URL', 
-    default='https://mnraynor90-facefusionfastapi-private.hf.space')
+# HuggingFace Configuration - FIXED
+# 🔑 Use space name format (not full URL) for Gradio client
+HUGGINGFACE_SPACE_NAME = env('HUGGINGFACE_SPACE_NAME', default='mnraynor90/facefusionfastapi-private')
+HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
+
+print(f"🔧 HuggingFace Space: {HUGGINGFACE_SPACE_NAME}")
+print(f"🔑 HuggingFace Token: {'***configured***' if HUGGINGFACE_API_TOKEN != 'dummy' else 'NOT SET'}")
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
@@ -249,5 +254,3 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
-# Add this line with your other API keys
-HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")

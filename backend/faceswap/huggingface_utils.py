@@ -19,6 +19,9 @@ HUGGINGFACE_SPACE_NAME = getattr(settings, 'HUGGINGFACE_SPACE_NAME',
 # 🔑 HuggingFace Authentication Token (from environment)
 HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
 
+# Export these for use in views
+__all__ = ['FaceFusionClient', 'process_face_swap', 'HUGGINGFACE_SPACE_NAME', 'HUGGINGFACE_API_TOKEN']
+
 class FaceFusionClient:
     """
     FIXED: Proper Gradio Client for private space with correct API endpoints

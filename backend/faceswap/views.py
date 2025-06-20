@@ -1,4 +1,4 @@
-from rest_framework import generics, status
+from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -74,8 +74,6 @@ class FaceSwapStatusView(APIView):
             'created_at': job.created_at,
             'completed_at': job.completed_at
         })
-    
-# Add this to your existing faceswap/views.py file
 
 class FaceSwapTestURLView(APIView):
     """
@@ -123,8 +121,6 @@ class FaceSwapTestURLView(APIView):
             return Response({
                 'error': f'Face swap failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-# Add this debug view to your faceswap/views.py
 
 class DebugGradioAPIView(APIView):
     """
@@ -134,66 +130,58 @@ class DebugGradioAPIView(APIView):
     
     def get(self, request):
         try:
-            from .huggingface_utils import HUGGINGFACE_SPACE_URL
+            from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
+            from gradio_client import Client
             import requests
             
             results = {}
             
-            # Test 1: Check if the space is running
+            # Build the .hf.space URL for testing
+            space_parts = HUGGINGFACE_SPACE_NAME.split('/')
+            if len(space_parts) == 2:
+                direct_url = f"https://{space_parts[0]}-{space_parts[1]}.hf.space"
+            else:
+                direct_url = "Invalid space name format"
+            
+            results['configuration'] = {
+                'space_name': HUGGINGFACE_SPACE_NAME,
+                'direct_url': direct_url,
+                'token_configured': bool(HUGGINGFACE_API_TOKEN),
+                'token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0
+            }
+            
+            # Test 1: Check if the space is accessible
             try:
-                response = requests.get(HUGGINGFACE_SPACE_URL, timeout=10)
-                results['space_status'] = f"HTTP {response.status_code}"
-                results['space_accessible'] = response.status_code == 200
+                response = requests.get(direct_url, timeout=10)
+                results['space_accessibility'] = {
+                    'status': f"HTTP {response.status_code}",
+                    'accessible': response.status_code == 200,
+                    'response_size': len(response.content)
+                }
             except Exception as e:
-                results['space_status'] = f"Error: {str(e)}"
-                results['space_accessible'] = False
+                results['space_accessibility'] = {
+                    'status': f"Error: {str(e)}",
+                    'accessible': False
+                }
             
-            # Test 2: Try to get API info using gradio_client
+            # Test 2: Try Gradio client connection
             try:
-                from gradio_client import Client
-                client = Client(HUGGINGFACE_SPACE_URL)
-                api_info = client.view_api(all_endpoints=True)
-                results['gradio_client_success'] = True
-                results['api_info'] = str(api_info)
+                client = Client(HUGGINGFACE_SPACE_NAME, hf_token=HUGGINGFACE_API_TOKEN)
+                api_info = client.view_api(return_format="dict")
+                results['gradio_client'] = {
+                    'connection': 'success',
+                    'api_endpoints': list(api_info.keys()) if isinstance(api_info, dict) else 'Not a dict',
+                    'endpoint_count': len(api_info) if isinstance(api_info, dict) else 0,
+                    'has_process_images': '/process_images' in str(api_info)
+                }
             except Exception as e:
-                results['gradio_client_success'] = False
-                results['gradio_client_error'] = str(e)
-            
-            # Test 3: Try common Gradio endpoints
-            endpoints_to_test = [
-                '/api/predict',
-                '/run/predict', 
-                '/predict',
-                '/api',
-                '/info',
-                '/app_info'
-            ]
-            
-            results['endpoint_tests'] = {}
-            for endpoint in endpoints_to_test:
-                try:
-                    url = f"{HUGGINGFACE_SPACE_URL}{endpoint}"
-                    response = requests.get(url, timeout=5)
-                    results['endpoint_tests'][endpoint] = {
-                        'status': response.status_code,
-                        'content_type': response.headers.get('content-type', 'unknown'),
-                        'content_preview': response.text[:200] if response.text else 'No content'
-                    }
-                except Exception as e:
-                    results['endpoint_tests'][endpoint] = {
-                        'error': str(e)
-                    }
-            
-            # Test 4: Check if it's a Gradio 4 or 5 app
-            try:
-                response = requests.get(f"{HUGGINGFACE_SPACE_URL}/info", timeout=5)
-                if response.status_code == 200:
-                    results['gradio_info'] = response.json()
-            except:
-                pass
+                results['gradio_client'] = {
+                    'connection': 'failed',
+                    'error': str(e)
+                }
                 
             return Response({
-                'space_url': HUGGINGFACE_SPACE_URL,
+                'space_name': HUGGINGFACE_SPACE_NAME,
                 'debug_results': results
             })
             
@@ -201,7 +189,6 @@ class DebugGradioAPIView(APIView):
             return Response({
                 'error': f'Debug failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
 
 class HuggingFaceDebugView(APIView):
     """
@@ -211,16 +198,31 @@ class HuggingFaceDebugView(APIView):
     
     def get(self, request):
         try:
-            from .huggingface_utils import HUGGINGFACE_SPACE_URL, HUGGINGFACE_API_TOKEN
-            import requests
+            from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
             from gradio_client import Client
+            import requests
             
             results = {}
+            
+            # Build direct URL from space name
+            space_parts = HUGGINGFACE_SPACE_NAME.split('/')
+            if len(space_parts) == 2:
+                direct_url = f"https://{space_parts[0]}-{space_parts[1]}.hf.space"
+            else:
+                return Response({
+                    'error': f'Invalid space name format: {HUGGINGFACE_SPACE_NAME}. Expected: owner/space-name'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            results['configuration'] = {
+                'space_name': HUGGINGFACE_SPACE_NAME,
+                'direct_url': direct_url,
+                'token_configured': bool(HUGGINGFACE_API_TOKEN)
+            }
             
             # Test 1: Basic connectivity
             try:
                 print("🔍 Testing basic connectivity...")
-                response = requests.get(HUGGINGFACE_SPACE_URL, timeout=10)
+                response = requests.get(direct_url, timeout=10)
                 results['basic_connectivity'] = {
                     'status': f"HTTP {response.status_code}",
                     'accessible': response.status_code == 200,
@@ -232,63 +234,10 @@ class HuggingFaceDebugView(APIView):
                     'accessible': False
                 }
             
-            # Test 2: Authentication test
-            try:
-                print("🔑 Testing authentication...")
-                headers = {}
-                if HUGGINGFACE_API_TOKEN:
-                    headers['Authorization'] = f'Bearer {HUGGINGFACE_API_TOKEN}'
-                
-                response = requests.get(
-                    f"{HUGGINGFACE_SPACE_URL}/info", 
-                    headers=headers,
-                    timeout=10
-                )
-                results['authentication'] = {
-                    'status': response.status_code,
-                    'token_provided': bool(HUGGINGFACE_API_TOKEN),
-                    'token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0,
-                    'response': response.text[:200] if response.text else 'No content'
-                }
-            except Exception as e:
-                results['authentication'] = {
-                    'error': str(e),
-                    'token_provided': bool(HUGGINGFACE_API_TOKEN)
-                }
-            
-            # Test 3: Gradio API endpoints
-            api_endpoints = [
-                '/api/predict',
-                '/run/predict',
-                '/api/queue/push',
-                '/info',
-                '/config'
-            ]
-            
-            results['api_endpoints'] = {}
-            for endpoint in api_endpoints:
-                try:
-                    headers = {}
-                    if HUGGINGFACE_API_TOKEN:
-                        headers['Authorization'] = f'Bearer {HUGGINGFACE_API_TOKEN}'
-                    
-                    response = requests.get(
-                        f"{HUGGINGFACE_SPACE_URL}{endpoint}",
-                        headers=headers,
-                        timeout=5
-                    )
-                    results['api_endpoints'][endpoint] = {
-                        'status': response.status_code,
-                        'content_type': response.headers.get('content-type', 'unknown'),
-                        'size': len(response.content)
-                    }
-                except Exception as e:
-                    results['api_endpoints'][endpoint] = {'error': str(e)}
-            
-            # Test 4: Gradio Client connection
+            # Test 2: Gradio Client connection
             try:
                 print("🎭 Testing Gradio Client...")
-                client = Client(HUGGINGFACE_SPACE_URL, hf_token=HUGGINGFACE_API_TOKEN)
+                client = Client(HUGGINGFACE_SPACE_NAME, hf_token=HUGGINGFACE_API_TOKEN)
                 
                 # Try to get API info
                 api_info = client.view_api(return_format="dict")
@@ -299,7 +248,7 @@ class HuggingFaceDebugView(APIView):
                 }
                 
                 # Check if our specific endpoint exists
-                if 'process_images' in str(api_info):
+                if '/process_images' in str(api_info):
                     results['gradio_client']['process_images_available'] = True
                 else:
                     results['gradio_client']['process_images_available'] = False
@@ -311,46 +260,22 @@ class HuggingFaceDebugView(APIView):
                     'error': str(e)
                 }
             
-            # Test 5: Direct API test with sample data
+            # Test 3: Try actual FaceFusion client
             try:
-                print("🧪 Testing direct API call...")
-                headers = {'Content-Type': 'application/json'}
-                if HUGGINGFACE_API_TOKEN:
-                    headers['Authorization'] = f'Bearer {HUGGINGFACE_API_TOKEN}'
+                print("🧪 Testing FaceFusion client...")
+                from .huggingface_utils import FaceFusionClient
+                client = FaceFusionClient()
                 
-                test_payload = {
-                    "data": [
-                        "https://res.cloudinary.com/dddye9wli/image/upload/v1749856308/selfie2_sukvhg.jpg",
-                        "https://res.cloudinary.com/dddye9wli/image/upload/v1749857225/elvisnotsinging_twnnta.png"
-                    ],
-                    "fn_index": 0
+                # Test setup
+                setup_result = client.setup_facefusion()
+                results['facefusion_client'] = {
+                    'setup': 'success',
+                    'setup_result': setup_result
                 }
-                
-                response = requests.post(
-                    f"{HUGGINGFACE_SPACE_URL}/api/predict",
-                    json=test_payload,
-                    headers=headers,
-                    timeout=60
-                )
-                
-                results['direct_api_test'] = {
-                    'status': response.status_code,
-                    'success': response.status_code == 200,
-                    'response_preview': response.text[:300] if response.text else 'No content',
-                    'headers': dict(response.headers)
-                }
-                
-                if response.status_code == 200:
-                    try:
-                        response_json = response.json()
-                        results['direct_api_test']['response_type'] = type(response_json).__name__
-                        results['direct_api_test']['has_data'] = 'data' in response_json
-                    except:
-                        results['direct_api_test']['response_type'] = 'not_json'
                 
             except Exception as e:
-                results['direct_api_test'] = {
-                    'status': 'error',
+                results['facefusion_client'] = {
+                    'setup': 'failed',
                     'error': str(e)
                 }
             
@@ -364,39 +289,30 @@ class HuggingFaceDebugView(APIView):
                 recommendations.append("🔑 No API token provided - add HUGGINGFACE_API_TOKEN")
             
             if results.get('gradio_client', {}).get('connection') == 'failed':
-                recommendations.append("🎭 Gradio client connection failed - try direct API approach")
+                recommendations.append("🎭 Gradio client connection failed - check space name and token")
             
             if not results.get('gradio_client', {}).get('process_images_available'):
                 recommendations.append("📋 process_images endpoint not found - check your Gradio app")
-            
-            if results.get('direct_api_test', {}).get('status') == 429:
-                recommendations.append("⚠️ Rate limited on direct API - space may be overwhelmed")
             
             if not recommendations:
                 recommendations.append("✅ All tests passed - connection should work!")
             
             return Response({
-                'space_url': HUGGINGFACE_SPACE_URL,
+                'space_name': HUGGINGFACE_SPACE_NAME,
+                'direct_url': direct_url,
                 'token_configured': bool(HUGGINGFACE_API_TOKEN),
                 'test_results': results,
-                'recommendations': recommendations,
-                'next_steps': [
-                    "1. Ensure your HuggingFace Space is running and accessible",
-                    "2. Verify your HUGGINGFACE_API_TOKEN is correct",
-                    "3. Check that your Gradio app has the 'process_images' function",
-                    "4. Try the enhanced FaceFusionClient with multiple fallback methods",
-                    "5. Monitor your Space's logs for errors"
-                ]
+                'recommendations': recommendations
             })
             
         except Exception as e:
             return Response({
                 'error': f'Debug failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+
 class TestGradioConnectionView(APIView):
     """Test Gradio client connection with environment variables"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
     
     def get(self, request):
         try:
@@ -427,8 +343,22 @@ class TestGradioConnectionView(APIView):
             })
             
         except Exception as e:
+            # Make sure debug_info is available in the error case
+            debug_info = {}
+            try:
+                from django.conf import settings
+                from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
+                debug_info = {
+                    'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
+                    'api_token_configured': bool(getattr(settings, 'HUGGINGFACE_API_TOKEN', None)),
+                    'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
+                    'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0
+                }
+            except Exception:
+                pass
+                
             return Response({
                 'status': 'error',
-                'debug_info': debug_info if 'debug_info' in locals() else {},
+                'debug_info': debug_info,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

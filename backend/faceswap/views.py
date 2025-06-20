@@ -393,3 +393,42 @@ class HuggingFaceDebugView(APIView):
             return Response({
                 'error': f'Debug failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class TestGradioConnectionView(APIView):
+    """Test Gradio client connection with environment variables"""
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            from django.conf import settings
+            from .huggingface_utils import FaceFusionClient, HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
+            
+            # Debug environment variables
+            debug_info = {
+                'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
+                'api_token_configured': bool(getattr(settings, 'HUGGINGFACE_API_TOKEN', None)),
+                'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
+                'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0
+            }
+            
+            client = FaceFusionClient()
+            
+            # Test 1: Create client
+            gradio_client = client.get_client()
+            
+            # Test 2: Try setup
+            setup_result = client.setup_facefusion()
+            
+            return Response({
+                'status': 'success',
+                'debug_info': debug_info,
+                'setup_result': setup_result,
+                'message': 'Gradio client connection successful!'
+            })
+            
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'debug_info': debug_info if 'debug_info' in locals() else {},
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

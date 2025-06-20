@@ -12,7 +12,7 @@ import random
 import threading
 import json
 
-# 🔗 HuggingFace Space Configuration
+# 🔗 HuggingFace Space Configuration - matches environment variables
 HUGGINGFACE_SPACE_NAME = getattr(settings, 'HUGGINGFACE_SPACE_NAME', 
                                 'mnraynor90/facefusionfastapi-private')
 

@@ -6,7 +6,8 @@ from .views import (
     FaceSwapStatusView,
     FaceSwapTestURLView,
     DebugGradioAPIView,
-    HuggingFaceDebugView  # Add this import
+    HuggingFaceDebugView,  # Add this import
+    TestGradioConnectionView
 )
 
 app_name = "faceswap"
@@ -19,4 +20,6 @@ urlpatterns = [
     path("test-url/", FaceSwapTestURLView.as_view(), name="test-url"),
     path("debug/", DebugGradioAPIView.as_view(), name="debug"),
     path("debug-hf/", HuggingFaceDebugView.as_view(), name="debug-hf"),  # Add this line
+    path("test-gradio/", TestGradioConnectionView.as_view(), name="test-gradio"),
+
 ]

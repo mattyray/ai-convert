@@ -111,7 +111,7 @@ services:
       - "8002:8000"
     environment:
       - DEBUG=True
-      - DJANGO_DEBUG=True  # This is critical!
+      - DJANGO_DEBUG=True
       - DJANGO_SETTINGS_MODULE=django_project.settings.dev
       - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
       - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
@@ -120,7 +120,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      # 🔑 FIXED: Correct private space URL + HF token for authentication
       - HUGGINGFACE_FACESWAP_URL=https://mnraynor90-facefusionfastapi-private.hf.space
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
@@ -547,7 +549,7 @@ class FaceSwapJobAdmin(admin.ModelAdmin):
 
 ## faceswap/huggingface_utils.py
 ```python
-# faceswap/huggingface_utils.py - FIXED WITH CORRECT URL
+# faceswap/huggingface_utils.py - COMPLETE FIXED VERSION WITH AUTHENTICATION
 
 import requests
 import time
@@ -560,13 +562,21 @@ from gradio_client import Client
 import random
 import threading
 
+# 🔗 HuggingFace Space Configuration
 HUGGINGFACE_SPACE_URL = getattr(settings, 'HUGGINGFACE_FACESWAP_URL', 
                                'https://mnraynor90-facefusionfastapi-private.hf.space')
 
+# 🔑 HuggingFace Authentication Token (from environment)
+HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
+
 class SingletonGradioClient:
     """
-    Singleton pattern to ensure only ONE gradio client exists across the entire Django app
-    This prevents 'too many concurrent requests' errors
+    Singleton pattern with AUTHENTICATION to prevent "too many concurrent requests" errors
+    
+    Based on current HuggingFace best practices:
+    - Use hf_token parameter for private space authentication
+    - Single client instance to prevent connection issues
+    - Automatic token validation and error handling
     """
     _instance = None
     _client = None
@@ -580,32 +590,57 @@ class SingletonGradioClient:
         return cls._instance
     
     def get_client(self):
-        """Get the single gradio client instance, creating it if needed"""
+        """Get authenticated gradio client - FIXES RATE LIMITING!"""
         if self._client is None:
             with self._lock:
                 if self._client is None:
                     try:
-                        print("🔌 Creating singleton gradio client...")
-                        self._client = Client(HUGGINGFACE_SPACE_URL)
-                        print("✅ Singleton gradio client created successfully")
+                        print("🔌 Creating AUTHENTICATED gradio client...")
+                        print(f"🏠 Space: {HUGGINGFACE_SPACE_URL}")
+                        
+                        if HUGGINGFACE_API_TOKEN:
+                            print(f"🔑 Token: {HUGGINGFACE_API_TOKEN[:10]}... ✅")
+                            
+                            # ⭐ THE KEY FIX: Pass hf_token for authentication!
+                            # This eliminates "Slow down. Too many concurrent requests!" errors
+                            self._client = Client(
+                                HUGGINGFACE_SPACE_URL, 
+                                hf_token=HUGGINGFACE_API_TOKEN
+                            )
+                            print("✅ Authenticated gradio client created successfully!")
+                            print("🚫 Rate limiting should now be eliminated!")
+                            
+                        else:
+                            print("⚠️ No HUGGINGFACE_API_TOKEN found in environment!")
+                            print("⚠️ Creating unauthenticated client - may hit rate limits...")
+                            self._client = Client(HUGGINGFACE_SPACE_URL)
+                            print("💡 Add HUGGINGFACE_API_TOKEN to environment to fix rate limiting!")
+                        
                     except Exception as e:
                         print(f"❌ Failed to create gradio client: {e}")
+                        print(f"🔍 Check if space URL is correct: {HUGGINGFACE_SPACE_URL}")
+                        print(f"🔍 Check if HF token is valid: {HUGGINGFACE_API_TOKEN[:10] if HUGGINGFACE_API_TOKEN else 'None'}...")
                         raise e
         return self._client
     
     def reset_client(self):
         """Reset the client if it becomes invalid"""
         with self._lock:
-            print("🔄 Resetting gradio client...")
+            print("🔄 Resetting authenticated gradio client...")
             self._client = None
 
 # Global singleton instance
 gradio_singleton = SingletonGradioClient()
 
 class FaceFusionClient:
+    """
+    Enhanced FaceFusion client with authentication and error handling
+    Designed to work with private HuggingFace T4 spaces
+    """
+    
     def __init__(self):
         self.base_url = HUGGINGFACE_SPACE_URL
-        # Don't create client here - use singleton instead
+        # Don't create client here - use authenticated singleton
         
     def get_image_url(self, image_field):
         """Convert Django ImageField to accessible URL"""
@@ -641,7 +676,11 @@ class FaceFusionClient:
         while time.time() - start_time < max_wait:
             try:
                 # Check health endpoint first
-                health_response = requests.get(f"{self.base_url}/", timeout=10)
+                headers = {}
+                if HUGGINGFACE_API_TOKEN:
+                    headers['Authorization'] = f'Bearer {HUGGINGFACE_API_TOKEN}'
+                
+                health_response = requests.get(f"{self.base_url}/", headers=headers, timeout=10)
                 if health_response.status_code == 200:
                     print("✅ HF Space is responding")
                     return True
@@ -654,16 +693,17 @@ class FaceFusionClient:
         raise Exception(f"HF Space not ready after {max_wait}s")
     
     def _single_face_swap_attempt(self, source_url, target_url):
-        """Single attempt at face swapping using singleton client"""
+        """Single attempt with AUTHENTICATED client"""
         try:
-            print(f"🔄 Attempting face swap:")
+            print(f"🔄 Attempting AUTHENTICATED face swap:")
             print(f"  Source: {source_url[:80]}...")
             print(f"  Target: {target_url[:80]}...")
             
-            # Use the singleton client instead of creating new ones
+            # Use the AUTHENTICATED singleton client
             client = gradio_singleton.get_client()
             
-            # Call the API
+            # Call the API with authentication
+            # The /process_images endpoint should be available on your T4 space
             result = client.predict(
                 source_url,
                 target_url,
@@ -709,17 +749,24 @@ class FaceFusionClient:
             if any(keyword in error_msg for keyword in [
                 'connection', 'timeout', 'network', 'client'
             ]):
-                print("🔄 Connection issue detected, resetting singleton client...")
+                print("🔄 Connection issue detected, resetting authenticated client...")
                 gradio_singleton.reset_client()
             
+            # Rate limiting should be ELIMINATED with authentication!
             if 'slow down' in error_msg or 'too many' in error_msg:
-                raise Exception(f"Rate limited: {e}")
+                print("⚠️ Still getting rate limited with authentication!")
+                print(f"🔍 Token in use: {HUGGINGFACE_API_TOKEN[:10] if HUGGINGFACE_API_TOKEN else 'None'}...")
+                print("💡 This suggests a token or space configuration issue")
+                raise Exception(f"Rate limited even with auth - check HUGGINGFACE_API_TOKEN: {e}")
             else:
                 raise Exception(f"Face swap failed: {e}")
     
-    def swap_faces(self, source_image_field, target_image_field, max_retries=3):
+    def swap_faces(self, source_image_field, target_image_field, max_retries=2):
         """
-        Perform face swap with improved error handling and singleton client
+        Perform face swap with AUTHENTICATED client - should eliminate rate limiting!
+        
+        With proper authentication, rate limiting should be rare or non-existent
+        for private spaces owned by the token holder.
         """
         # Get URLs
         source_url = self.get_image_url(source_image_field)
@@ -732,12 +779,12 @@ class FaceFusionClient:
         
         for attempt in range(max_retries):
             try:
-                print(f"🔄 Face swap attempt {attempt + 1}/{max_retries} using singleton client")
+                print(f"🔄 AUTHENTICATED face swap attempt {attempt + 1}/{max_retries}")
                 
                 result_data = self._single_face_swap_attempt(source_url, target_url)
                 
                 if result_data and len(result_data) > 1000:  # Sanity check
-                    print(f"✅ Face swap succeeded: {len(result_data)} bytes")
+                    print(f"✅ AUTHENTICATED face swap succeeded: {len(result_data)} bytes")
                     return result_data
                 else:
                     raise Exception("Received empty or too small image data")
@@ -748,17 +795,17 @@ class FaceFusionClient:
                 
                 print(f"❌ Attempt {attempt + 1} failed: {e}")
                 
-                # Check if it's rate limiting
+                # With authentication, rate limiting should be very rare
                 if 'rate limit' in error_msg or 'slow down' in error_msg or 'too many' in error_msg:
                     if attempt < max_retries - 1:
-                        # Reset client and wait longer for rate limits
+                        # Reset client and wait
                         gradio_singleton.reset_client()
-                        delay = 15 + (attempt * 10) + random.uniform(0, 5)  # Longer delays
-                        print(f"⏳ Rate limited, resetting client and waiting {delay:.1f}s...")
+                        delay = 10 + random.uniform(0, 5)
+                        print(f"⏳ Unexpected rate limit with auth, waiting {delay:.1f}s...")
                         time.sleep(delay)
                         continue
                     else:
-                        raise Exception("Rate limited after all retries. Please try again in a few minutes.")
+                        raise Exception("Still rate limited with authentication - check HUGGINGFACE_API_TOKEN environment variable!")
                 
                 # For other errors, shorter delay
                 elif attempt < max_retries - 1:
@@ -774,7 +821,10 @@ class FaceFusionClient:
 
 def process_face_swap(job_id):
     """
-    Process a face swap job using Hugging Face Space with singleton client
+    Process a face swap job using AUTHENTICATED Hugging Face Space
+    
+    This function should now work without rate limiting issues
+    thanks to proper authentication.
     """
     from .models import FaceSwapJob
     from django.utils import timezone
@@ -784,7 +834,7 @@ def process_face_swap(job_id):
         job.status = 'processing'
         job.save()
         
-        print(f"🚀 Processing face swap job {job_id} with singleton client")
+        print(f"🚀 Processing face swap job {job_id} with AUTHENTICATED client")
         
         # Initialize client
         client = FaceFusionClient()
@@ -802,7 +852,7 @@ def process_face_swap(job_id):
         job.completed_at = timezone.now()
         job.save()
         
-        print(f"✅ Face swap job {job_id} completed successfully with singleton client")
+        print(f"✅ Face swap job {job_id} completed successfully with AUTHENTICATED client")
         return True
         
     except FaceSwapJob.DoesNotExist:
@@ -1984,6 +2034,9 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+
+# Add this line with your other API keys
+HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
 ```
 
 ## Dockerfile

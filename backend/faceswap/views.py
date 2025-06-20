@@ -311,36 +311,90 @@ class HuggingFaceDebugView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class TestGradioConnectionView(APIView):
-    """Test Gradio client connection with environment variables"""
+    """Enhanced test endpoint with comprehensive validation"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
         try:
             from django.conf import settings
-            from .huggingface_utils import FaceFusionClient, HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
+            from .huggingface_utils import (
+                FaceFusionClient, 
+                HUGGINGFACE_SPACE_NAME, 
+                HUGGINGFACE_API_TOKEN,
+                validate_huggingface_config
+            )
+            
+            # Step 1: Validate configuration
+            config_issues = validate_huggingface_config()
             
             # Debug environment variables
             debug_info = {
                 'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
-                'api_token_configured': bool(getattr(settings, 'HUGGINGFACE_API_TOKEN', None)),
                 'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
-                'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0
+                'api_token_configured': bool(HUGGINGFACE_API_TOKEN and HUGGINGFACE_API_TOKEN != 'dummy'),
+                'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0,
+                'api_token_format_valid': HUGGINGFACE_API_TOKEN.startswith('hf_') if HUGGINGFACE_API_TOKEN else False,
+                'config_issues': config_issues
             }
             
+            # If there are configuration issues, return early
+            if config_issues:
+                return Response({
+                    'status': 'configuration_error',
+                    'debug_info': debug_info,
+                    'recommendations': [
+                        '🔧 Fix configuration issues before testing connection',
+                        '🔑 Ensure HUGGINGFACE_API_TOKEN is set correctly',
+                        '📝 Check HUGGINGFACE_SPACE_NAME format (owner/space-name)'
+                    ]
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Step 2: Test connection
             client = FaceFusionClient()
+            connection_test = client.test_connection()
             
-            # Test 1: Create client
-            gradio_client = client.get_client()
-            
-            # Test 2: Try setup
-            setup_result = client.setup_facefusion()
-            
-            return Response({
-                'status': 'success',
-                'debug_info': debug_info,
-                'setup_result': setup_result,
-                'message': 'Gradio client connection successful!'
-            })
+            if connection_test['status'] == 'success':
+                # Step 3: Try setup if connection works
+                try:
+                    setup_result = client.setup_facefusion()
+                    return Response({
+                        'status': 'success',
+                        'debug_info': debug_info,
+                        'connection_test': connection_test,
+                        'setup_result': setup_result,
+                        'message': '🎉 All tests passed! Gradio client is ready for use.',
+                        'recommendations': [
+                            '✅ Configuration is valid',
+                            '✅ Authentication successful', 
+                            '✅ API endpoints accessible',
+                            '✅ Setup completed successfully'
+                        ]
+                    })
+                except Exception as setup_error:
+                    return Response({
+                        'status': 'setup_failed',
+                        'debug_info': debug_info,
+                        'connection_test': connection_test,
+                        'setup_error': str(setup_error),
+                        'message': '⚠️ Connection works but setup failed',
+                        'recommendations': [
+                            '✅ Authentication successful',
+                            '❌ Setup failed - check if the space is running',
+                            '🔄 Try again in a few moments'
+                        ]
+                    })
+            else:
+                return Response({
+                    'status': 'connection_failed',
+                    'debug_info': debug_info,
+                    'connection_test': connection_test,
+                    'recommendations': [
+                        '❌ Connection failed',
+                        '🔑 Check if API token is valid and not expired',
+                        '🏠 Verify space name is correct',
+                        '🚀 Ensure space is running and accessible'
+                    ]
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
         except Exception as e:
             # Make sure debug_info is available in the error case
@@ -350,9 +404,10 @@ class TestGradioConnectionView(APIView):
                 from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
                 debug_info = {
                     'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
-                    'api_token_configured': bool(getattr(settings, 'HUGGINGFACE_API_TOKEN', None)),
                     'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
-                    'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0
+                    'api_token_configured': bool(HUGGINGFACE_API_TOKEN and HUGGINGFACE_API_TOKEN != 'dummy'),
+                    'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0,
+                    'api_token_format_valid': HUGGINGFACE_API_TOKEN.startswith('hf_') if HUGGINGFACE_API_TOKEN else False
                 }
             except Exception:
                 pass
@@ -360,5 +415,10 @@ class TestGradioConnectionView(APIView):
             return Response({
                 'status': 'error',
                 'debug_info': debug_info,
-                'error': str(e)
+                'error': str(e),
+                'recommendations': [
+                    '❌ Unexpected error occurred',
+                    '🔍 Check logs for more details',
+                    '⚙️ Verify all environment variables are set correctly'
+                ]
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

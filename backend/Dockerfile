@@ -50,7 +50,7 @@ RUN pip3 install --upgrade pip wheel
 RUN pip3 install face_recognition
 RUN pip3 install -r requirements.txt
 
-# Set dummy environment variables for build time
+# Set dummy environment variables for build time (FIXED: Added HuggingFace vars)
 ENV DJANGO_SETTINGS_MODULE=django_project.settings.base
 ENV DJANGO_SECRET_KEY=build-time-secret-key
 ENV DATABASE_URL=sqlite:///tmp/build.db
@@ -58,6 +58,8 @@ ENV CLOUDINARY_CLOUD_NAME=dummy
 ENV CLOUDINARY_API_KEY=dummy
 ENV CLOUDINARY_API_SECRET=dummy
 ENV OPENAI_API_KEY=dummy
+ENV HUGGINGFACE_SPACE_NAME=dummy/dummy-space
+ENV HUGGINGFACE_API_TOKEN=dummy
 
 # Copy project
 COPY . /app/

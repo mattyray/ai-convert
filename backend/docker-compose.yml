@@ -34,8 +34,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
-      # 🔑 FIXED: Correct private space URL + HF token for authentication
-      - HUGGINGFACE_FACESWAP_URL=https://mnraynor90-facefusionfastapi-private.hf.space
+      # 🔑 FIXED: Use space name format for Gradio client (not full URL)
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
       - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
     volumes:
       - .:/app

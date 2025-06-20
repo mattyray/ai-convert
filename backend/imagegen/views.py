@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from .models import GeneratedImage
 from .face_match import match_face
-from faceswap.huggingface_utils import FaceFusionClient  # Use the working client!
+from faceswap.huggingface_utils import FaceFusionClient  # Use the fixed client!
 import tempfile
 import base64
 from django.core.files.base import ContentFile
@@ -37,33 +37,6 @@ HISTORICAL_FIGURES = {
 
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
-
-    def perform_face_swap_with_retry(self, source_mock, target_mock, match_name, max_retries=4):
-        """
-        Use the SAME working approach as FaceSwapTestURLView
-        """
-        print(f"🔄 Starting face swap for {match_name} using working FaceFusionClient")
-        
-        try:
-            # Use the exact same client that works in test-url
-            client = FaceFusionClient()
-            result_data = client.swap_faces(source_mock, target_mock)
-            
-            print(f"✅ Face swap completed using FaceFusionClient: {len(result_data)} bytes")
-            return result_data
-            
-        except Exception as e:
-            error_msg = str(e).lower()
-            print(f"❌ Face swap failed: {e}")
-            
-            # If it's a rate limiting error, provide helpful message
-            if any(keyword in error_msg for keyword in [
-                'slow down', 'too many', 'rate limit', 'concurrent requests',
-                'quota exceeded', 'throttled', 'busy'
-            ]):
-                raise Exception("Rate limited. Please try again in a few minutes.")
-            else:
-                raise e
 
     def post(self, request):
         selfie = request.FILES.get("selfie")
@@ -119,7 +92,7 @@ class GenerateImageView(APIView):
 
             print(f"📝 Created GeneratedImage record: {temp_image.id}")
 
-            # Step 3: Create mock image field objects for face swap (SAME AS TEST-URL)
+            # Step 3: Create mock image field objects for face swap
             class MockImageField:
                 def __init__(self, url):
                     self.url = url
@@ -129,10 +102,9 @@ class GenerateImageView(APIView):
 
             print(f"🔄 Starting face swap: {temp_image.selfie.url} -> {historical_image_url}")
 
-            # Step 4: Use the SAME approach as working test-url endpoint
-            result_image_data = self.perform_face_swap_with_retry(
-                source_mock, target_mock, match_name
-            )
+            # Step 4: Use the FIXED Gradio client approach
+            client = FaceFusionClient()
+            result_image_data = client.swap_faces(source_mock, target_mock)
 
             print(f"✅ Face swap completed: {len(result_image_data)} bytes")
 

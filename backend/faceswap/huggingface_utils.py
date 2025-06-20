@@ -1,4 +1,4 @@
-# faceswap/huggingface_utils.py - SOLUTION 1: Client.duplicate() approach
+# faceswap/huggingface_utils.py - FIXED VERSION
 
 import requests
 import time
@@ -10,96 +10,55 @@ import base64
 from gradio_client import Client
 import random
 import threading
+import json
 
 # 🔗 HuggingFace Space Configuration
-HUGGINGFACE_SPACE_URL = getattr(settings, 'HUGGINGFACE_FACESWAP_URL', 
-                               'https://mnraynor90-facefusionfastapi-private.hf.space')
+HUGGINGFACE_SPACE_NAME = getattr(settings, 'HUGGINGFACE_SPACE_NAME', 
+                                'mnraynor90/facefusionfastapi-private')
 
 # 🔑 HuggingFace Authentication Token (from environment)
 HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
 
-class SingletonGradioClient:
-    """
-    SOLUTION 1: Use Client.duplicate() to create unlimited-usage private space
-    This bypasses ALL rate limiting by creating your own copy of the space
-    """
-    _instance = None
-    _client = None
-    _duplicated_space_url = None
-    _lock = threading.Lock()
-    
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super(SingletonGradioClient, cls).__new__(cls)
-        return cls._instance
-    
-    def get_client(self):
-        """Get duplicated space client - ELIMINATES RATE LIMITING COMPLETELY!"""
-        if self._client is None:
-            with self._lock:
-                if self._client is None:
-                    try:
-                        print("🔌 Creating DUPLICATED space client...")
-                        print(f"🏠 Original Space: {HUGGINGFACE_SPACE_URL}")
-                        
-                        if not HUGGINGFACE_API_TOKEN:
-                            raise Exception("HUGGINGFACE_API_TOKEN required for space duplication!")
-                        
-                        print(f"🔑 Token: {HUGGINGFACE_API_TOKEN[:10]}... ✅")
-                        
-                        # 🌟 THE ULTIMATE FIX: Duplicate the space for unlimited usage!
-                        # This creates a private copy that bypasses all rate limiting
-                        print("🚀 Duplicating space for unlimited usage...")
-                        
-                        # Extract space name from URL
-                        # https://mnraynor90-facefusionfastapi-private.hf.space → mnraynor90/facefusionfastapi-private
-                        space_name = "mnraynor90/facefusionfastapi-private"
-                        
-                        print(f"📋 Duplicating space: {space_name}")
-                        
-                        self._client = Client.duplicate(
-                            space_name,
-                            hf_token=HUGGINGFACE_API_TOKEN,
-                            private=True,  # Keep it private
-                            hardware="t4-small"  # Match your T4 hardware
-                        )
-                        
-                        print("✅ DUPLICATED space client created successfully!")
-                        print("🚫 Rate limiting is now COMPLETELY ELIMINATED!")
-                        print("💰 You own this space copy - unlimited requests!")
-                        
-                    except Exception as e:
-                        print(f"❌ Failed to duplicate space: {e}")
-                        print("💡 Falling back to direct connection...")
-                        
-                        # Fallback to direct connection with auth
-                        self._client = Client(
-                            HUGGINGFACE_SPACE_URL, 
-                            hf_token=HUGGINGFACE_API_TOKEN
-                        )
-                        print("⚠️ Using direct connection - may still hit rate limits")
-                        
-        return self._client
-    
-    def reset_client(self):
-        """Reset the client if it becomes invalid"""
-        with self._lock:
-            print("🔄 Resetting duplicated space client...")
-            self._client = None
-
-# Global singleton instance
-gradio_singleton = SingletonGradioClient()
-
 class FaceFusionClient:
     """
-    Enhanced FaceFusion client using duplicated space (unlimited usage)
+    FIXED: Proper Gradio Client for private space with correct API endpoints
     """
     
     def __init__(self):
-        self.base_url = HUGGINGFACE_SPACE_URL
+        self.client = None
+        self.space_name = HUGGINGFACE_SPACE_NAME
         
+    def get_client(self):
+        """Get authenticated Gradio client for private space"""
+        if self.client is None:
+            try:
+                print(f"🔌 Creating authenticated Gradio client for: {self.space_name}")
+                
+                if not HUGGINGFACE_API_TOKEN:
+                    raise Exception("HUGGINGFACE_API_TOKEN required for private space!")
+                
+                # Connect to private space with authentication
+                self.client = Client(
+                    self.space_name,
+                    hf_token=HUGGINGFACE_API_TOKEN
+                )
+                
+                print("✅ Authenticated Gradio client created successfully")
+                
+                # Test the connection by getting API info
+                try:
+                    api_info = self.client.view_api()
+                    print(f"📋 API connection successful")
+                    print(f"🔧 Available endpoints: /setup_facefusion, /process_images, /get_system_info")
+                except Exception as e:
+                    print(f"⚠️ Could not get API info: {e}")
+                
+            except Exception as e:
+                print(f"❌ Failed to create Gradio client: {e}")
+                raise e
+                
+        return self.client
+    
     def get_image_url(self, image_field):
         """Convert Django ImageField to accessible URL"""
         try:
@@ -126,99 +85,119 @@ class FaceFusionClient:
         except Exception as e:
             raise Exception(f"Failed to get image URL: {str(e)}")
     
-    def swap_faces(self, source_image_field, target_image_field, max_retries=2):
+    def setup_facefusion(self):
+        """Setup FaceFusion before processing"""
+        try:
+            print("🔧 Setting up FaceFusion...")
+            client = self.get_client()
+            
+            result = client.predict(api_name="/setup_facefusion")
+            print(f"✅ Setup complete: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"❌ Setup failed: {e}")
+            raise e
+    
+    def swap_faces(self, source_image_field, target_image_field, max_retries=3):
         """
-        Perform face swap using DUPLICATED SPACE - unlimited usage!
+        FIXED: Use proper Gradio client with correct API endpoint
         """
         # Get URLs
         source_url = self.get_image_url(source_image_field)
         target_url = self.get_image_url(target_image_field)
         
-        last_error = None
+        print(f"🔄 Starting face swap with Gradio client")
+        print(f"  Source: {source_url[:80]}...")
+        print(f"  Target: {target_url[:80]}...")
         
         for attempt in range(max_retries):
             try:
-                print(f"🔄 DUPLICATED SPACE face swap attempt {attempt + 1}/{max_retries}")
-                print(f"  Source: {source_url[:80]}...")
-                print(f"  Target: {target_url[:80]}...")
+                print(f"🎭 Face swap attempt {attempt + 1}/{max_retries}")
                 
-                # Use the DUPLICATED space client (unlimited usage!)
-                client = gradio_singleton.get_client()
+                client = self.get_client()
                 
-                # Call the API on your private duplicated space
+                # Optional: Setup FaceFusion first
+                try:
+                    self.setup_facefusion()
+                except:
+                    print("⚠️ Setup failed, continuing anyway...")
+                
+                # Call the correct API endpoint with proper parameters
                 result = client.predict(
-                    source_url,
-                    target_url,
+                    source_url=source_url,  # 👤 Source Image URL (Face to transfer)
+                    target_url=target_url,  # 🎯 Target Image URL (Body/scene)
                     api_name="/process_images"
                 )
                 
-                print(f"📋 Result type: {type(result)}, length: {len(result) if result else 0}")
+                print(f"📋 Gradio result: {type(result)} - {result}")
                 
                 if not result or len(result) < 2:
                     raise Exception(f"Invalid result format: {result}")
                 
-                result_image = result[0]
-                status_message = result[1]
+                result_filepath = result[0]  # Image file path
+                status_message = result[1]   # Status message
                 
                 print(f"📋 Status: {status_message}")
+                print(f"📁 Result file: {result_filepath}")
                 
-                # Handle different result types
-                if hasattr(result_image, 'save'):  # PIL Image
+                # Handle the result file path
+                if hasattr(result_filepath, 'save'):  # PIL Image
                     print("✅ Got PIL Image, converting to bytes")
                     import io
                     img_buffer = io.BytesIO()
-                    result_image.save(img_buffer, format='JPEG', quality=90)
+                    result_filepath.save(img_buffer, format='JPEG', quality=90)
                     return img_buffer.getvalue()
                     
-                elif isinstance(result_image, str) and os.path.exists(result_image):  # File path
-                    print(f"✅ Got file path: {result_image}")
-                    with open(result_image, 'rb') as f:
+                elif isinstance(result_filepath, str) and os.path.exists(result_filepath):  # File path
+                    print(f"✅ Got file path: {result_filepath}")
+                    with open(result_filepath, 'rb') as f:
                         return f.read()
                         
-                elif isinstance(result_image, dict) and 'path' in result_image:  # Dict with path
-                    file_path = result_image['path']
-                    if os.path.exists(file_path):
-                        with open(file_path, 'rb') as f:
+                elif isinstance(result_filepath, dict):  # Gradio file object
+                    if 'path' in result_filepath and os.path.exists(result_filepath['path']):
+                        print(f"✅ Got Gradio file object: {result_filepath['path']}")
+                        with open(result_filepath['path'], 'rb') as f:
                             return f.read()
-                            
+                    elif 'url' in result_filepath:
+                        print(f"✅ Got URL from Gradio: {result_filepath['url']}")
+                        # Download from URL
+                        response = requests.get(result_filepath['url'], timeout=60)
+                        response.raise_for_status()
+                        return response.content
+                        
                 else:
-                    raise Exception(f"Unexpected result format: {type(result_image)}")
+                    raise Exception(f"Unexpected result format: {type(result_filepath)} - {result_filepath}")
                     
             except Exception as e:
-                last_error = e
                 error_msg = str(e).lower()
+                print(f"❌ Face swap attempt {attempt + 1} failed: {e}")
                 
-                print(f"❌ Attempt {attempt + 1} failed: {e}")
-                
-                # With duplicated space, rate limiting should be impossible
                 if 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
-                    print("🚨 UNEXPECTED: Still getting rate limited with duplicated space!")
-                    print("💡 This suggests duplication failed - check logs above")
+                    print("🚨 Rate limited - resetting client")
+                    self.client = None  # Reset client
                     
                     if attempt < max_retries - 1:
-                        gradio_singleton.reset_client()
-                        delay = 5 + random.uniform(0, 3)
-                        print(f"⏳ Resetting and waiting {delay:.1f}s...")
+                        delay = (2 ** attempt) * 3 + random.uniform(0, 3)
+                        print(f"⏳ Waiting {delay:.1f}s...")
                         time.sleep(delay)
                         continue
                     else:
-                        raise Exception("Rate limited even with duplicated space - check HUGGINGFACE_API_TOKEN!")
+                        raise Exception("Rate limited after all retries")
                 
-                # For other errors, shorter delay
                 elif attempt < max_retries - 1:
-                    delay = 3 + random.uniform(0, 2)
+                    delay = 5 + random.uniform(0, 2)
                     print(f"⏳ Retrying in {delay:.1f}s...")
                     time.sleep(delay)
                     continue
                 else:
                     break
         
-        # All attempts failed
-        raise Exception(f"Face swap failed after {max_retries} attempts. Last error: {last_error}")
+        raise Exception(f"All face swap attempts failed")
 
 def process_face_swap(job_id):
     """
-    Process a face swap job using DUPLICATED SPACE (unlimited usage)
+    Process a face swap job using the fixed Gradio client
     """
     from .models import FaceSwapJob
     from django.utils import timezone
@@ -228,9 +207,9 @@ def process_face_swap(job_id):
         job.status = 'processing'
         job.save()
         
-        print(f"🚀 Processing face swap job {job_id} with DUPLICATED SPACE")
+        print(f"🚀 Processing face swap job {job_id} with fixed Gradio client")
         
-        # Initialize client
+        # Initialize the client
         client = FaceFusionClient()
         
         # Perform face swap
@@ -246,7 +225,7 @@ def process_face_swap(job_id):
         job.completed_at = timezone.now()
         job.save()
         
-        print(f"✅ Face swap job {job_id} completed successfully with DUPLICATED SPACE")
+        print(f"✅ Face swap job {job_id} completed successfully")
         return True
         
     except FaceSwapJob.DoesNotExist:

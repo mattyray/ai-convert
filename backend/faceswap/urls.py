@@ -1,5 +1,3 @@
-# Update your faceswap/urls.py to include the test endpoint
-
 from django.urls import path
 from .views import (
     FaceSwapCreateView,
@@ -7,7 +5,8 @@ from .views import (
     FaceSwapDetailView,
     FaceSwapStatusView,
     FaceSwapTestURLView,
-    DebugGradioAPIView  # Add this import
+    DebugGradioAPIView,
+    HuggingFaceDebugView  # Add this import
 )
 
 app_name = "faceswap"
@@ -18,5 +17,6 @@ urlpatterns = [
     path("jobs/<int:pk>/", FaceSwapDetailView.as_view(), name="detail"),
     path("status/<int:job_id>/", FaceSwapStatusView.as_view(), name="status"),
     path("test-url/", FaceSwapTestURLView.as_view(), name="test-url"),
-    path("debug/", DebugGradioAPIView.as_view(), name="debug"),  # Add this line
+    path("debug/", DebugGradioAPIView.as_view(), name="debug"),
+    path("debug-hf/", HuggingFaceDebugView.as_view(), name="debug-hf"),  # Add this line
 ]

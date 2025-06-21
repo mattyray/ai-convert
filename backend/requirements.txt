@@ -56,4 +56,4 @@ django-cors-headers==4.6.0
 gradio-client==1.10.3
 
 
-dj-database-url>=3.0.0
+dj-database-url==2.1.0

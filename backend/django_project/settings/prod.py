@@ -1,4 +1,4 @@
-from .base import *  # import all base settings
+from .base import *  # Import all base settings
 import dj_database_url
 
 DEBUG = False
@@ -20,14 +20,13 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # -------------- DATABASE CONFIGURATION --------------
-# Using dj-database-url v3.0.0 — automatically picks up DATABASE_URL env var :contentReference[oaicite:2]{index=2}
 db_config = dj_database_url.config(
     conn_max_age=600,
     conn_health_checks=True,
-    ssl_require=True
+    ssl_require=True,
 )
 
-# Ensure ENGINE is always present
+# Ensure ENGINE is explicitly set for psycopg2
 if "ENGINE" not in db_config:
     db_config["ENGINE"] = "django.db.backends.postgresql"
 
@@ -39,38 +38,36 @@ DATABASES = {
 ALLOWED_HOSTS = [
     "ai-face-swap-app.fly.dev",
     "localhost",
-    "127.0.0.1"
+    "127.0.0.1",
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "https://your-frontend-app.netlify.app",
+    "https://your-frontend-app.netlify.app",  # Replace when deployed
     "https://ai-face-swap-app.fly.dev",
 ]
 
-# -------------- HEALTH CHECK --------------
+# -------------- HEALTH CHECK ENDPOINT --------------
 from django.http import JsonResponse
 
 def health_check(request):
     return JsonResponse({"status": "healthy"})
 
-# (Make sure urlconf includes `path("health/", health_check)`, which you've already done)
-
-# -------------- LOGGING --------------
+# -------------- LOGGING CONFIG --------------
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {
-        "console": {"class": "logging.StreamHandler"}
+        "console": {"class": "logging.StreamHandler"},
     },
     "root": {
         "handlers": ["console"],
-        "level": "INFO"
+        "level": "INFO",
     },
     "loggers": {
         "django": {
             "handlers": ["console"],
             "level": "INFO",
-            "propagate": False
-        }
-    }
+            "propagate": False,
+        },
+    },
 }

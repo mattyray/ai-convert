@@ -1,5 +1,7 @@
 from .base import *  # Import all base settings
+import os
 import dj_database_url
+from django.http import JsonResponse
 
 DEBUG = False
 
@@ -26,9 +28,9 @@ db_config = dj_database_url.config(
     ssl_require=True,
 )
 
-# Ensure ENGINE is explicitly set for psycopg2
-if "ENGINE" not in db_config:
-    db_config["ENGINE"] = "django.db.backends.postgresql"
+# ✅ Ensure required fields
+db_config.setdefault("ENGINE", "django.db.backends.postgresql")
+db_config.setdefault("NAME", dj_database_url.parse(os.environ["DATABASE_URL"]).get("NAME", "postgres"))
 
 DATABASES = {
     "default": db_config
@@ -47,8 +49,6 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # -------------- HEALTH CHECK ENDPOINT --------------
-from django.http import JsonResponse
-
 def health_check(request):
     return JsonResponse({"status": "healthy"})
 

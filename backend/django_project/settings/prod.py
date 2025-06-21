@@ -20,9 +20,12 @@ CSRF_COOKIE_SECURE = True
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# Database - use Fly.io Postgres
+# ✅ FIXED: Proper DATABASES config for Fly Postgres via dj_database_url
 DATABASES = {
-    'default': dj_database_url.parse(env('DATABASE_URL'))
+    'default': dj_database_url.config(
+        conn_max_age=600,
+        ssl_require=True
+    )
 }
 
 # Allowed hosts - update with your Fly.io app name
@@ -34,19 +37,16 @@ ALLOWED_HOSTS = [
 
 # CORS settings for your frontend
 CORS_ALLOWED_ORIGINS = [
-    "https://your-frontend-app.netlify.app",  # Will update after frontend deployment
+    "https://your-frontend-app.netlify.app",  # Replace with actual frontend domain when live
     "https://ai-face-swap-app.fly.dev",
 ]
 
-# Add health check URL
+# Health check view (to be added to your urls.py)
 from django.urls import path, include
 from django.http import JsonResponse
 
 def health_check(request):
     return JsonResponse({"status": "healthy"})
-
-# Add to your main urls.py
-# path('health/', health_check, name='health-check'),
 
 # Logging for production
 LOGGING = {

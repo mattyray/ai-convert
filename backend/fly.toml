@@ -1,27 +1,47 @@
-
-app = 'ai-face-swap-app'
-primary_region = 'ewr'
-console_command = '/code/manage.py shell'
+app = "ai-face-swap-app"
+primary_region = "ewr"
+console_command = "/code/manage.py shell"
 
 [build]
 
-
 [env]
-  PORT = '8000'
+  PORT = "8000"
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = 'stop'
   auto_start_machines = true
+  auto_stop_machines = "stop"
   min_machines_running = 0
-  processes = ['app']
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 20
+    hard_limit = 25
 
 [[vm]]
-  memory = '2gb'
-  cpu_kind = 'shared'
+  memory = "2gb"
+  cpu_kind = "shared"
   cpus = 1
 
 [[statics]]
-  guest_path = '/code/static'
-  url_prefix = '/static/'
+  guest_path = "/code/static"
+  url_prefix = "/static/"
+
+# Postgres internal service (Flycast resolution)
+[[services]]
+  internal_port = 5432
+  protocol = "tcp"
+  auto_start_machines = true
+  auto_stop_machines = true
+  processes = ["app"]
+
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 20
+    hard_limit = 25
+
+  [[services.ports]]
+    port = 5432
+    handlers = ["pg_tls"]

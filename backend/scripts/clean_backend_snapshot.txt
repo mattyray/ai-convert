@@ -64,7 +64,7 @@ cmake==4.0.2
 
 django-cors-headers==4.6.0
 gradio-client==1.10.3
-
+    
 ```
 
 ## requirements-dev.txt
@@ -120,8 +120,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
-      # 🔑 FIXED: Correct private space URL + HF token for authentication
-      - HUGGINGFACE_FACESWAP_URL=https://mnraynor90-facefusionfastapi-private.hf.space
+      # 🔑 FIXED: Use space name format for Gradio client (not full URL)
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
       - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
     volumes:
       - .:/app
@@ -549,7 +549,7 @@ class FaceSwapJobAdmin(admin.ModelAdmin):
 
 ## faceswap/huggingface_utils.py
 ```python
-# faceswap/huggingface_utils.py - SOLUTION 1: Client.duplicate() approach
+# faceswap/huggingface_utils.py - IMPROVED VERSION
 
 import requests
 import time
@@ -561,96 +561,114 @@ import base64
 from gradio_client import Client
 import random
 import threading
+import json
 
-# 🔗 HuggingFace Space Configuration
-HUGGINGFACE_SPACE_URL = getattr(settings, 'HUGGINGFACE_FACESWAP_URL', 
-                               'https://mnraynor90-facefusionfastapi-private.hf.space')
+# 🔗 HuggingFace Space Configuration - matches environment variables
+HUGGINGFACE_SPACE_NAME = getattr(settings, 'HUGGINGFACE_SPACE_NAME', 
+                                'mnraynor90/facefusionfastapi-private')
 
 # 🔑 HuggingFace Authentication Token (from environment)
 HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
 
-class SingletonGradioClient:
-    """
-    SOLUTION 1: Use Client.duplicate() to create unlimited-usage private space
-    This bypasses ALL rate limiting by creating your own copy of the space
-    """
-    _instance = None
-    _client = None
-    _duplicated_space_url = None
-    _lock = threading.Lock()
-    
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super(SingletonGradioClient, cls).__new__(cls)
-        return cls._instance
-    
-    def get_client(self):
-        """Get duplicated space client - ELIMINATES RATE LIMITING COMPLETELY!"""
-        if self._client is None:
-            with self._lock:
-                if self._client is None:
-                    try:
-                        print("🔌 Creating DUPLICATED space client...")
-                        print(f"🏠 Original Space: {HUGGINGFACE_SPACE_URL}")
-                        
-                        if not HUGGINGFACE_API_TOKEN:
-                            raise Exception("HUGGINGFACE_API_TOKEN required for space duplication!")
-                        
-                        print(f"🔑 Token: {HUGGINGFACE_API_TOKEN[:10]}... ✅")
-                        
-                        # 🌟 THE ULTIMATE FIX: Duplicate the space for unlimited usage!
-                        # This creates a private copy that bypasses all rate limiting
-                        print("🚀 Duplicating space for unlimited usage...")
-                        
-                        # Extract space name from URL
-                        # https://mnraynor90-facefusionfastapi-private.hf.space → mnraynor90/facefusionfastapi-private
-                        space_name = "mnraynor90/facefusionfastapi-private"
-                        
-                        print(f"📋 Duplicating space: {space_name}")
-                        
-                        self._client = Client.duplicate(
-                            space_name,
-                            hf_token=HUGGINGFACE_API_TOKEN,
-                            private=True,  # Keep it private
-                            hardware="t4-small"  # Match your T4 hardware
-                        )
-                        
-                        print("✅ DUPLICATED space client created successfully!")
-                        print("🚫 Rate limiting is now COMPLETELY ELIMINATED!")
-                        print("💰 You own this space copy - unlimited requests!")
-                        
-                    except Exception as e:
-                        print(f"❌ Failed to duplicate space: {e}")
-                        print("💡 Falling back to direct connection...")
-                        
-                        # Fallback to direct connection with auth
-                        self._client = Client(
-                            HUGGINGFACE_SPACE_URL, 
-                            hf_token=HUGGINGFACE_API_TOKEN
-                        )
-                        print("⚠️ Using direct connection - may still hit rate limits")
-                        
-        return self._client
-    
-    def reset_client(self):
-        """Reset the client if it becomes invalid"""
-        with self._lock:
-            print("🔄 Resetting duplicated space client...")
-            self._client = None
+# Export these for use in views
+__all__ = ['FaceFusionClient', 'process_face_swap', 'HUGGINGFACE_SPACE_NAME', 'HUGGINGFACE_API_TOKEN']
 
-# Global singleton instance
-gradio_singleton = SingletonGradioClient()
+def validate_huggingface_config():
+    """Validate HuggingFace configuration for security and correctness"""
+    issues = []
+    
+    # Check space name format
+    if not HUGGINGFACE_SPACE_NAME or '/' not in HUGGINGFACE_SPACE_NAME:
+        issues.append("Invalid HUGGINGFACE_SPACE_NAME format. Expected: 'owner/space-name'")
+    
+    # Check API token
+    if not HUGGINGFACE_API_TOKEN or HUGGINGFACE_API_TOKEN in ['dummy', 'your_token_here']:
+        issues.append("Missing or invalid HUGGINGFACE_API_TOKEN. Private spaces require authentication.")
+    elif not HUGGINGFACE_API_TOKEN.startswith('hf_'):
+        issues.append("Invalid HUGGINGFACE_API_TOKEN format. HuggingFace tokens should start with 'hf_'")
+    elif len(HUGGINGFACE_API_TOKEN) < 30:
+        issues.append("HUGGINGFACE_API_TOKEN appears too short to be valid")
+    
+    return issues
 
 class FaceFusionClient:
     """
-    Enhanced FaceFusion client using duplicated space (unlimited usage)
+    IMPROVED: Proper Gradio Client for private space with enhanced authentication and validation
     """
     
     def __init__(self):
-        self.base_url = HUGGINGFACE_SPACE_URL
+        self.client = None
+        self.space_name = HUGGINGFACE_SPACE_NAME
+        self._validate_config()
         
+    def _validate_config(self):
+        """Validate configuration before attempting connection"""
+        issues = validate_huggingface_config()
+        if issues:
+            raise Exception(f"HuggingFace configuration issues: {'; '.join(issues)}")
+    
+    def get_client(self):
+        """Get authenticated Gradio client for private space with enhanced error handling"""
+        if self.client is None:
+            try:
+                print(f"🔌 Creating authenticated Gradio client for: {self.space_name}")
+                print(f"🔑 Token length: {len(HUGGINGFACE_API_TOKEN)} chars")
+                
+                # Connect to private space with authentication
+                self.client = Client(
+                    self.space_name,
+                    hf_token=HUGGINGFACE_API_TOKEN
+                )
+                
+                print("✅ Authenticated Gradio client created successfully")
+                
+                # Test the connection by getting API info
+                try:
+                    api_info = self.client.view_api()
+                    print(f"📋 API connection successful")
+                    
+                    # Check for required endpoints
+                    api_str = str(api_info)
+                    if '/process_images' in api_str:
+                        print("✅ Required /process_images endpoint found")
+                    else:
+                        print(f"⚠️ /process_images endpoint not found. Available: {api_str[:200]}...")
+                        
+                except Exception as e:
+                    print(f"⚠️ Could not verify API endpoints: {e}")
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                if 'authentication' in error_msg or 'token' in error_msg or 'unauthorized' in error_msg:
+                    raise Exception(f"❌ Authentication failed: Invalid or expired HuggingFace API token. Please check your HUGGINGFACE_API_TOKEN")
+                elif 'not found' in error_msg or '404' in error_msg:
+                    raise Exception(f"❌ Space not found: '{self.space_name}' does not exist or is not accessible")
+                elif 'rate limit' in error_msg or 'too many' in error_msg:
+                    raise Exception(f"❌ Rate limited: Too many requests to HuggingFace. Please try again later")
+                else:
+                    raise Exception(f"❌ Failed to create Gradio client: {e}")
+                
+        return self.client
+    
+    def test_connection(self):
+        """Test connection without performing operations"""
+        try:
+            client = self.get_client()
+            api_info = client.view_api()
+            return {
+                'status': 'success',
+                'space_name': self.space_name,
+                'token_valid': True,
+                'api_endpoints_available': '/process_images' in str(api_info)
+            }
+        except Exception as e:
+            return {
+                'status': 'failed',
+                'space_name': self.space_name,
+                'token_valid': False,
+                'error': str(e)
+            }
+    
     def get_image_url(self, image_field):
         """Convert Django ImageField to accessible URL"""
         try:
@@ -677,99 +695,128 @@ class FaceFusionClient:
         except Exception as e:
             raise Exception(f"Failed to get image URL: {str(e)}")
     
-    def swap_faces(self, source_image_field, target_image_field, max_retries=2):
+    def setup_facefusion(self):
+        """Setup FaceFusion before processing with retry logic"""
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                print(f"🔧 Setting up FaceFusion (attempt {attempt + 1}/{max_retries})...")
+                client = self.get_client()
+                
+                result = client.predict(api_name="/setup_facefusion")
+                print(f"✅ Setup complete: {result}")
+                return result
+                
+            except Exception as e:
+                print(f"❌ Setup attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    self.client = None  # Reset client for retry
+                    continue
+                raise e
+    
+    def swap_faces(self, source_image_field, target_image_field, max_retries=3):
         """
-        Perform face swap using DUPLICATED SPACE - unlimited usage!
+        IMPROVED: Use proper Gradio client with enhanced error handling and validation
         """
         # Get URLs
         source_url = self.get_image_url(source_image_field)
         target_url = self.get_image_url(target_image_field)
         
-        last_error = None
+        print(f"🔄 Starting face swap with Gradio client")
+        print(f"  Source: {source_url[:80]}...")
+        print(f"  Target: {target_url[:80]}...")
         
         for attempt in range(max_retries):
             try:
-                print(f"🔄 DUPLICATED SPACE face swap attempt {attempt + 1}/{max_retries}")
-                print(f"  Source: {source_url[:80]}...")
-                print(f"  Target: {target_url[:80]}...")
+                print(f"🎭 Face swap attempt {attempt + 1}/{max_retries}")
                 
-                # Use the DUPLICATED space client (unlimited usage!)
-                client = gradio_singleton.get_client()
+                client = self.get_client()
                 
-                # Call the API on your private duplicated space
+                # Optional: Setup FaceFusion first
+                try:
+                    self.setup_facefusion()
+                except Exception as setup_error:
+                    print(f"⚠️ Setup failed: {setup_error}, continuing anyway...")
+                
+                # Call the correct API endpoint with proper parameters
                 result = client.predict(
-                    source_url,
-                    target_url,
+                    source_url=source_url,  # 👤 Source Image URL (Face to transfer)
+                    target_url=target_url,  # 🎯 Target Image URL (Body/scene)
                     api_name="/process_images"
                 )
                 
-                print(f"📋 Result type: {type(result)}, length: {len(result) if result else 0}")
+                print(f"📋 Gradio result: {type(result)} - {result}")
                 
                 if not result or len(result) < 2:
                     raise Exception(f"Invalid result format: {result}")
                 
-                result_image = result[0]
-                status_message = result[1]
+                result_filepath = result[0]  # Image file path
+                status_message = result[1]   # Status message
                 
                 print(f"📋 Status: {status_message}")
+                print(f"📁 Result file: {result_filepath}")
                 
-                # Handle different result types
-                if hasattr(result_image, 'save'):  # PIL Image
+                # Handle the result file path
+                if hasattr(result_filepath, 'save'):  # PIL Image
                     print("✅ Got PIL Image, converting to bytes")
                     import io
                     img_buffer = io.BytesIO()
-                    result_image.save(img_buffer, format='JPEG', quality=90)
+                    result_filepath.save(img_buffer, format='JPEG', quality=90)
                     return img_buffer.getvalue()
                     
-                elif isinstance(result_image, str) and os.path.exists(result_image):  # File path
-                    print(f"✅ Got file path: {result_image}")
-                    with open(result_image, 'rb') as f:
+                elif isinstance(result_filepath, str) and os.path.exists(result_filepath):  # File path
+                    print(f"✅ Got file path: {result_filepath}")
+                    with open(result_filepath, 'rb') as f:
                         return f.read()
                         
-                elif isinstance(result_image, dict) and 'path' in result_image:  # Dict with path
-                    file_path = result_image['path']
-                    if os.path.exists(file_path):
-                        with open(file_path, 'rb') as f:
+                elif isinstance(result_filepath, dict):  # Gradio file object
+                    if 'path' in result_filepath and os.path.exists(result_filepath['path']):
+                        print(f"✅ Got Gradio file object: {result_filepath['path']}")
+                        with open(result_filepath['path'], 'rb') as f:
                             return f.read()
-                            
+                    elif 'url' in result_filepath:
+                        print(f"✅ Got URL from Gradio: {result_filepath['url']}")
+                        # Download from URL
+                        response = requests.get(result_filepath['url'], timeout=60)
+                        response.raise_for_status()
+                        return response.content
+                        
                 else:
-                    raise Exception(f"Unexpected result format: {type(result_image)}")
+                    raise Exception(f"Unexpected result format: {type(result_filepath)} - {result_filepath}")
                     
             except Exception as e:
-                last_error = e
                 error_msg = str(e).lower()
+                print(f"❌ Face swap attempt {attempt + 1} failed: {e}")
                 
-                print(f"❌ Attempt {attempt + 1} failed: {e}")
-                
-                # With duplicated space, rate limiting should be impossible
-                if 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
-                    print("🚨 UNEXPECTED: Still getting rate limited with duplicated space!")
-                    print("💡 This suggests duplication failed - check logs above")
+                # Handle specific error types
+                if 'authentication' in error_msg or 'unauthorized' in error_msg:
+                    raise Exception("Authentication failed. Please check your HuggingFace API token.")
+                elif 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
+                    print("🚨 Rate limited - resetting client")
+                    self.client = None  # Reset client
                     
                     if attempt < max_retries - 1:
-                        gradio_singleton.reset_client()
-                        delay = 5 + random.uniform(0, 3)
-                        print(f"⏳ Resetting and waiting {delay:.1f}s...")
+                        delay = (2 ** attempt) * 3 + random.uniform(0, 3)
+                        print(f"⏳ Waiting {delay:.1f}s...")
                         time.sleep(delay)
                         continue
                     else:
-                        raise Exception("Rate limited even with duplicated space - check HUGGINGFACE_API_TOKEN!")
+                        raise Exception("Rate limited after all retries")
                 
-                # For other errors, shorter delay
                 elif attempt < max_retries - 1:
-                    delay = 3 + random.uniform(0, 2)
+                    delay = 5 + random.uniform(0, 2)
                     print(f"⏳ Retrying in {delay:.1f}s...")
                     time.sleep(delay)
                     continue
                 else:
                     break
         
-        # All attempts failed
-        raise Exception(f"Face swap failed after {max_retries} attempts. Last error: {last_error}")
+        raise Exception(f"All face swap attempts failed")
 
 def process_face_swap(job_id):
     """
-    Process a face swap job using DUPLICATED SPACE (unlimited usage)
+    Process a face swap job using the improved Gradio client
     """
     from .models import FaceSwapJob
     from django.utils import timezone
@@ -779,10 +826,15 @@ def process_face_swap(job_id):
         job.status = 'processing'
         job.save()
         
-        print(f"🚀 Processing face swap job {job_id} with DUPLICATED SPACE")
+        print(f"🚀 Processing face swap job {job_id} with improved Gradio client")
         
-        # Initialize client
+        # Initialize the client
         client = FaceFusionClient()
+        
+        # Test connection first
+        connection_test = client.test_connection()
+        if connection_test['status'] != 'success':
+            raise Exception(f"Connection test failed: {connection_test['error']}")
         
         # Perform face swap
         result_image_data = client.swap_faces(job.source_image, job.target_image)
@@ -797,7 +849,7 @@ def process_face_swap(job_id):
         job.completed_at = timezone.now()
         job.save()
         
-        print(f"✅ Face swap job {job_id} completed successfully with DUPLICATED SPACE")
+        print(f"✅ Face swap job {job_id} completed successfully")
         return True
         
     except FaceSwapJob.DoesNotExist:
@@ -816,8 +868,6 @@ def process_face_swap(job_id):
 
 ## faceswap/urls.py
 ```python
-# Update your faceswap/urls.py to include the test endpoint
-
 from django.urls import path
 from .views import (
     FaceSwapCreateView,
@@ -825,7 +875,9 @@ from .views import (
     FaceSwapDetailView,
     FaceSwapStatusView,
     FaceSwapTestURLView,
-    DebugGradioAPIView  # Add this import
+    DebugGradioAPIView,
+    HuggingFaceDebugView,  # Add this import
+    TestGradioConnectionView
 )
 
 app_name = "faceswap"
@@ -836,13 +888,16 @@ urlpatterns = [
     path("jobs/<int:pk>/", FaceSwapDetailView.as_view(), name="detail"),
     path("status/<int:job_id>/", FaceSwapStatusView.as_view(), name="status"),
     path("test-url/", FaceSwapTestURLView.as_view(), name="test-url"),
-    path("debug/", DebugGradioAPIView.as_view(), name="debug"),  # Add this line
+    path("debug/", DebugGradioAPIView.as_view(), name="debug"),
+    path("debug-hf/", HuggingFaceDebugView.as_view(), name="debug-hf"),  # Add this line
+    path("test-gradio/", TestGradioConnectionView.as_view(), name="test-gradio"),
+
 ]
 ```
 
 ## faceswap/views.py
 ```python
-from rest_framework import generics, status
+from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -918,8 +973,6 @@ class FaceSwapStatusView(APIView):
             'created_at': job.created_at,
             'completed_at': job.completed_at
         })
-    
-# Add this to your existing faceswap/views.py file
 
 class FaceSwapTestURLView(APIView):
     """
@@ -967,8 +1020,6 @@ class FaceSwapTestURLView(APIView):
             return Response({
                 'error': f'Face swap failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-# Add this debug view to your faceswap/views.py
 
 class DebugGradioAPIView(APIView):
     """
@@ -978,72 +1029,297 @@ class DebugGradioAPIView(APIView):
     
     def get(self, request):
         try:
-            from .huggingface_utils import HUGGINGFACE_SPACE_URL
+            from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
+            from gradio_client import Client
             import requests
             
             results = {}
             
-            # Test 1: Check if the space is running
+            # Build the .hf.space URL for testing
+            space_parts = HUGGINGFACE_SPACE_NAME.split('/')
+            if len(space_parts) == 2:
+                direct_url = f"https://{space_parts[0]}-{space_parts[1]}.hf.space"
+            else:
+                direct_url = "Invalid space name format"
+            
+            results['configuration'] = {
+                'space_name': HUGGINGFACE_SPACE_NAME,
+                'direct_url': direct_url,
+                'token_configured': bool(HUGGINGFACE_API_TOKEN),
+                'token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0
+            }
+            
+            # Test 1: Check if the space is accessible
             try:
-                response = requests.get(HUGGINGFACE_SPACE_URL, timeout=10)
-                results['space_status'] = f"HTTP {response.status_code}"
-                results['space_accessible'] = response.status_code == 200
+                response = requests.get(direct_url, timeout=10)
+                results['space_accessibility'] = {
+                    'status': f"HTTP {response.status_code}",
+                    'accessible': response.status_code == 200,
+                    'response_size': len(response.content)
+                }
             except Exception as e:
-                results['space_status'] = f"Error: {str(e)}"
-                results['space_accessible'] = False
+                results['space_accessibility'] = {
+                    'status': f"Error: {str(e)}",
+                    'accessible': False
+                }
             
-            # Test 2: Try to get API info using gradio_client
+            # Test 2: Try Gradio client connection
             try:
-                from gradio_client import Client
-                client = Client(HUGGINGFACE_SPACE_URL)
-                api_info = client.view_api(all_endpoints=True)
-                results['gradio_client_success'] = True
-                results['api_info'] = str(api_info)
+                client = Client(HUGGINGFACE_SPACE_NAME, hf_token=HUGGINGFACE_API_TOKEN)
+                api_info = client.view_api(return_format="dict")
+                results['gradio_client'] = {
+                    'connection': 'success',
+                    'api_endpoints': list(api_info.keys()) if isinstance(api_info, dict) else 'Not a dict',
+                    'endpoint_count': len(api_info) if isinstance(api_info, dict) else 0,
+                    'has_process_images': '/process_images' in str(api_info)
+                }
             except Exception as e:
-                results['gradio_client_success'] = False
-                results['gradio_client_error'] = str(e)
-            
-            # Test 3: Try common Gradio endpoints
-            endpoints_to_test = [
-                '/api/predict',
-                '/run/predict', 
-                '/predict',
-                '/api',
-                '/info',
-                '/app_info'
-            ]
-            
-            results['endpoint_tests'] = {}
-            for endpoint in endpoints_to_test:
-                try:
-                    url = f"{HUGGINGFACE_SPACE_URL}{endpoint}"
-                    response = requests.get(url, timeout=5)
-                    results['endpoint_tests'][endpoint] = {
-                        'status': response.status_code,
-                        'content_type': response.headers.get('content-type', 'unknown'),
-                        'content_preview': response.text[:200] if response.text else 'No content'
-                    }
-                except Exception as e:
-                    results['endpoint_tests'][endpoint] = {
-                        'error': str(e)
-                    }
-            
-            # Test 4: Check if it's a Gradio 4 or 5 app
-            try:
-                response = requests.get(f"{HUGGINGFACE_SPACE_URL}/info", timeout=5)
-                if response.status_code == 200:
-                    results['gradio_info'] = response.json()
-            except:
-                pass
+                results['gradio_client'] = {
+                    'connection': 'failed',
+                    'error': str(e)
+                }
                 
             return Response({
-                'space_url': HUGGINGFACE_SPACE_URL,
+                'space_name': HUGGINGFACE_SPACE_NAME,
                 'debug_results': results
             })
             
         except Exception as e:
             return Response({
                 'error': f'Debug failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class HuggingFaceDebugView(APIView):
+    """
+    Comprehensive debug endpoint to test HuggingFace Space connectivity
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
+            from gradio_client import Client
+            import requests
+            
+            results = {}
+            
+            # Build direct URL from space name
+            space_parts = HUGGINGFACE_SPACE_NAME.split('/')
+            if len(space_parts) == 2:
+                direct_url = f"https://{space_parts[0]}-{space_parts[1]}.hf.space"
+            else:
+                return Response({
+                    'error': f'Invalid space name format: {HUGGINGFACE_SPACE_NAME}. Expected: owner/space-name'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            results['configuration'] = {
+                'space_name': HUGGINGFACE_SPACE_NAME,
+                'direct_url': direct_url,
+                'token_configured': bool(HUGGINGFACE_API_TOKEN)
+            }
+            
+            # Test 1: Basic connectivity
+            try:
+                print("🔍 Testing basic connectivity...")
+                response = requests.get(direct_url, timeout=10)
+                results['basic_connectivity'] = {
+                    'status': f"HTTP {response.status_code}",
+                    'accessible': response.status_code == 200,
+                    'response_size': len(response.content)
+                }
+            except Exception as e:
+                results['basic_connectivity'] = {
+                    'status': f"Error: {str(e)}",
+                    'accessible': False
+                }
+            
+            # Test 2: Gradio Client connection
+            try:
+                print("🎭 Testing Gradio Client...")
+                client = Client(HUGGINGFACE_SPACE_NAME, hf_token=HUGGINGFACE_API_TOKEN)
+                
+                # Try to get API info
+                api_info = client.view_api(return_format="dict")
+                results['gradio_client'] = {
+                    'connection': 'success',
+                    'api_endpoints': list(api_info.keys()) if isinstance(api_info, dict) else 'Not a dict',
+                    'endpoint_count': len(api_info) if isinstance(api_info, dict) else 0
+                }
+                
+                # Check if our specific endpoint exists
+                if '/process_images' in str(api_info):
+                    results['gradio_client']['process_images_available'] = True
+                else:
+                    results['gradio_client']['process_images_available'] = False
+                    results['gradio_client']['available_endpoints'] = str(api_info)[:500]
+                
+            except Exception as e:
+                results['gradio_client'] = {
+                    'connection': 'failed',
+                    'error': str(e)
+                }
+            
+            # Test 3: Try actual FaceFusion client
+            try:
+                print("🧪 Testing FaceFusion client...")
+                from .huggingface_utils import FaceFusionClient
+                client = FaceFusionClient()
+                
+                # Test setup
+                setup_result = client.setup_facefusion()
+                results['facefusion_client'] = {
+                    'setup': 'success',
+                    'setup_result': setup_result
+                }
+                
+            except Exception as e:
+                results['facefusion_client'] = {
+                    'setup': 'failed',
+                    'error': str(e)
+                }
+            
+            # Summary and recommendations
+            recommendations = []
+            
+            if not results.get('basic_connectivity', {}).get('accessible'):
+                recommendations.append("❌ Space is not accessible - check if it's running")
+            
+            if not HUGGINGFACE_API_TOKEN:
+                recommendations.append("🔑 No API token provided - add HUGGINGFACE_API_TOKEN")
+            
+            if results.get('gradio_client', {}).get('connection') == 'failed':
+                recommendations.append("🎭 Gradio client connection failed - check space name and token")
+            
+            if not results.get('gradio_client', {}).get('process_images_available'):
+                recommendations.append("📋 process_images endpoint not found - check your Gradio app")
+            
+            if not recommendations:
+                recommendations.append("✅ All tests passed - connection should work!")
+            
+            return Response({
+                'space_name': HUGGINGFACE_SPACE_NAME,
+                'direct_url': direct_url,
+                'token_configured': bool(HUGGINGFACE_API_TOKEN),
+                'test_results': results,
+                'recommendations': recommendations
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': f'Debug failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class TestGradioConnectionView(APIView):
+    """Enhanced test endpoint with comprehensive validation"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            from django.conf import settings
+            from .huggingface_utils import (
+                FaceFusionClient, 
+                HUGGINGFACE_SPACE_NAME, 
+                HUGGINGFACE_API_TOKEN,
+                validate_huggingface_config
+            )
+            
+            # Step 1: Validate configuration
+            config_issues = validate_huggingface_config()
+            
+            # Debug environment variables
+            debug_info = {
+                'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
+                'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
+                'api_token_configured': bool(HUGGINGFACE_API_TOKEN and HUGGINGFACE_API_TOKEN != 'dummy'),
+                'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0,
+                'api_token_format_valid': HUGGINGFACE_API_TOKEN.startswith('hf_') if HUGGINGFACE_API_TOKEN else False,
+                'config_issues': config_issues
+            }
+            
+            # If there are configuration issues, return early
+            if config_issues:
+                return Response({
+                    'status': 'configuration_error',
+                    'debug_info': debug_info,
+                    'recommendations': [
+                        '🔧 Fix configuration issues before testing connection',
+                        '🔑 Ensure HUGGINGFACE_API_TOKEN is set correctly',
+                        '📝 Check HUGGINGFACE_SPACE_NAME format (owner/space-name)'
+                    ]
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Step 2: Test connection
+            client = FaceFusionClient()
+            connection_test = client.test_connection()
+            
+            if connection_test['status'] == 'success':
+                # Step 3: Try setup if connection works
+                try:
+                    setup_result = client.setup_facefusion()
+                    return Response({
+                        'status': 'success',
+                        'debug_info': debug_info,
+                        'connection_test': connection_test,
+                        'setup_result': setup_result,
+                        'message': '🎉 All tests passed! Gradio client is ready for use.',
+                        'recommendations': [
+                            '✅ Configuration is valid',
+                            '✅ Authentication successful', 
+                            '✅ API endpoints accessible',
+                            '✅ Setup completed successfully'
+                        ]
+                    })
+                except Exception as setup_error:
+                    return Response({
+                        'status': 'setup_failed',
+                        'debug_info': debug_info,
+                        'connection_test': connection_test,
+                        'setup_error': str(setup_error),
+                        'message': '⚠️ Connection works but setup failed',
+                        'recommendations': [
+                            '✅ Authentication successful',
+                            '❌ Setup failed - check if the space is running',
+                            '🔄 Try again in a few moments'
+                        ]
+                    })
+            else:
+                return Response({
+                    'status': 'connection_failed',
+                    'debug_info': debug_info,
+                    'connection_test': connection_test,
+                    'recommendations': [
+                        '❌ Connection failed',
+                        '🔑 Check if API token is valid and not expired',
+                        '🏠 Verify space name is correct',
+                        '🚀 Ensure space is running and accessible'
+                    ]
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        except Exception as e:
+            # Make sure debug_info is available in the error case
+            debug_info = {}
+            try:
+                from django.conf import settings
+                from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
+                debug_info = {
+                    'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
+                    'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
+                    'api_token_configured': bool(HUGGINGFACE_API_TOKEN and HUGGINGFACE_API_TOKEN != 'dummy'),
+                    'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0,
+                    'api_token_format_valid': HUGGINGFACE_API_TOKEN.startswith('hf_') if HUGGINGFACE_API_TOKEN else False
+                }
+            except Exception:
+                pass
+                
+            return Response({
+                'status': 'error',
+                'debug_info': debug_info,
+                'error': str(e),
+                'recommendations': [
+                    '❌ Unexpected error occurred',
+                    '🔍 Check logs for more details',
+                    '⚙️ Verify all environment variables are set correctly'
+                ]
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 ```
 
@@ -1244,7 +1520,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from .models import GeneratedImage
 from .face_match import match_face
-from faceswap.huggingface_utils import FaceFusionClient  # Use the working client!
+from faceswap.huggingface_utils import FaceFusionClient  # Use the fixed client!
 import tempfile
 import base64
 from django.core.files.base import ContentFile
@@ -1278,33 +1554,6 @@ HISTORICAL_FIGURES = {
 
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
-
-    def perform_face_swap_with_retry(self, source_mock, target_mock, match_name, max_retries=4):
-        """
-        Use the SAME working approach as FaceSwapTestURLView
-        """
-        print(f"🔄 Starting face swap for {match_name} using working FaceFusionClient")
-        
-        try:
-            # Use the exact same client that works in test-url
-            client = FaceFusionClient()
-            result_data = client.swap_faces(source_mock, target_mock)
-            
-            print(f"✅ Face swap completed using FaceFusionClient: {len(result_data)} bytes")
-            return result_data
-            
-        except Exception as e:
-            error_msg = str(e).lower()
-            print(f"❌ Face swap failed: {e}")
-            
-            # If it's a rate limiting error, provide helpful message
-            if any(keyword in error_msg for keyword in [
-                'slow down', 'too many', 'rate limit', 'concurrent requests',
-                'quota exceeded', 'throttled', 'busy'
-            ]):
-                raise Exception("Rate limited. Please try again in a few minutes.")
-            else:
-                raise e
 
     def post(self, request):
         selfie = request.FILES.get("selfie")
@@ -1360,7 +1609,7 @@ class GenerateImageView(APIView):
 
             print(f"📝 Created GeneratedImage record: {temp_image.id}")
 
-            # Step 3: Create mock image field objects for face swap (SAME AS TEST-URL)
+            # Step 3: Create mock image field objects for face swap
             class MockImageField:
                 def __init__(self, url):
                     self.url = url
@@ -1370,10 +1619,9 @@ class GenerateImageView(APIView):
 
             print(f"🔄 Starting face swap: {temp_image.selfie.url} -> {historical_image_url}")
 
-            # Step 4: Use the SAME approach as working test-url endpoint
-            result_image_data = self.perform_face_swap_with_retry(
-                source_mock, target_mock, match_name
-            )
+            # Step 4: Use the FIXED Gradio client approach
+            client = FaceFusionClient()
+            result_image_data = client.swap_faces(source_mock, target_mock)
 
             print(f"✅ Face swap completed: {len(result_image_data)} bytes")
 
@@ -1943,8 +2191,13 @@ REST_FRAMEWORK = {
     ]
 }
 
-HUGGINGFACE_FACESWAP_URL = env('HUGGINGFACE_FACESWAP_URL', 
-    default='https://mnraynor90-facefusionfastapi-private.hf.space')
+# HuggingFace Configuration - FIXED
+# 🔑 Use space name format (not full URL) for Gradio client
+HUGGINGFACE_SPACE_NAME = env('HUGGINGFACE_SPACE_NAME', default='mnraynor90/facefusionfastapi-private')
+HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
+
+print(f"🔧 HuggingFace Space: {HUGGINGFACE_SPACE_NAME}")
+print(f"🔑 HuggingFace Token: {'***configured***' if HUGGINGFACE_API_TOKEN != 'dummy' else 'NOT SET'}")
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
@@ -1955,8 +2208,7 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
-# Add this line with your other API keys
-HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
+
 ```
 
 ## Dockerfile
@@ -2013,7 +2265,7 @@ RUN pip3 install --upgrade pip wheel
 RUN pip3 install face_recognition
 RUN pip3 install -r requirements.txt
 
-# Set dummy environment variables for build time
+# Set dummy environment variables for build time (FIXED: Added HuggingFace vars)
 ENV DJANGO_SETTINGS_MODULE=django_project.settings.base
 ENV DJANGO_SECRET_KEY=build-time-secret-key
 ENV DATABASE_URL=sqlite:///tmp/build.db
@@ -2021,6 +2273,7 @@ ENV CLOUDINARY_CLOUD_NAME=dummy
 ENV CLOUDINARY_API_KEY=dummy
 ENV CLOUDINARY_API_SECRET=dummy
 ENV OPENAI_API_KEY=dummy
+ENV HUGGINGFACE_SPACE_NAME=mnraynor90/facefusionfastapi-private
 
 # Copy project
 COPY . /app/

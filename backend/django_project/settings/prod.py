@@ -2,6 +2,7 @@ from .base import *
 import dj_database_url
 import os
 
+
 DEBUG = False
 
 # Security settings for production
@@ -20,7 +21,6 @@ CSRF_COOKIE_SECURE = True
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# ✅ FIXED: Proper DATABASES config for Fly Postgres via dj_database_url
 DATABASES = {
     'default': dj_database_url.config(
         conn_max_age=600,

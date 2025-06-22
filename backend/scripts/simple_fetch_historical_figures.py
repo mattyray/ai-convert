@@ -1,4 +1,4 @@
-# root_level_fetch_historical_figures.py - Images are at root level, not in subfolders!
+# root_level_fetch_historical_figures.py - Images are at root level, not in subfolders! this is fetch url py file
 
 import cv2
 import os

@@ -16,6 +16,9 @@ import time
 import random
 
 # Map historical figures to their Cloudinary URLs - UPDATED WITH 65+ FIGURES
+# Generated from Cloudinary root level
+# Copy this dict to your Django views.py
+
 HISTORICAL_FIGURES = {
     "Abraham Lincoln": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608917/Abraham_Lincoln_o5kbjh.png",
     "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749854959/alexander_the_great_j5icxu.png",
@@ -36,6 +39,7 @@ HISTORICAL_FIGURES = {
     "Danny Devito": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Danny_Devito_ajkoal.png",
     "Donald Trump": "https://res.cloudinary.com/dddye9wli/image/upload/v1750550608/Donald_Trump_yqggmn.png",
     "Elon Musk": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Elon_Musk_c3ii8i.png",
+    "Elvis": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png", #god dammit
     "Elvisnotsinging": "https://res.cloudinary.com/dddye9wli/image/upload/v1749857225/elvisnotsinging_twnnta.png",
     "Frida Khalo": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921232/frida_khalo_gzibma.png",
     "Genghis Khan": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608927/Genghis_Khan_ewsfvk.png",
@@ -64,7 +68,6 @@ HISTORICAL_FIGURES = {
     "Marilyn Monroe": "https://res.cloudinary.com/dddye9wli/image/upload/v1749858269/marilyn_monroe_zhaxku.png",
     "Mark Zuckerberg": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608936/Mark_Zuckerberg_tvctxl.png",
     "Mona Lisa": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608976/Mona_Lisa_cwnwdk.png",
-    "Mother Theresa": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608980/mother_theresa_f9i2iv.png",
     "Napolean": "https://res.cloudinary.com/dddye9wli/image/upload/v1749742732/napolean_azenei.png",
     "Oprah Winfrey": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608983/oprah_winfrey_c24nib.png",
     "Paula Dean": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608987/Paula_Dean_lmyabz.png",
@@ -82,6 +85,7 @@ HISTORICAL_FIGURES = {
     "Xi Jinping": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609010/Xi_Jinping_tiyqx2.png",
     "Yoko Ono": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609010/Yoco_ono_ttzyo1.png",
 }
+
 
 
 class GenerateImageView(APIView):

@@ -1,20 +1,12 @@
-# fetch_historical_figures_opencv.py - OpenCV version (much simpler!)
+# simple_fetch_historical_figures.py - No Django dependencies!
 
 import cv2
 import os
 import json
 import requests
-import tempfile
-from pathlib import Path
 import re
 import numpy as np
-
-# Django setup
-import sys
-import django
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.dev')
-django.setup()
+from pathlib import Path
 
 # Cloudinary setup
 try:
@@ -32,7 +24,10 @@ except ImportError:
     print("❌ Cloudinary not installed. Run: pip install cloudinary")
     exit(1)
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Get the current directory and create output folder
+SCRIPT_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = SCRIPT_DIR / "face_data"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def clean_filename_to_name(filename):
     """Convert filename to clean display name"""
@@ -74,7 +69,22 @@ def clean_filename_to_name(filename):
         'Winston Churchill': 'Winston Churchill',
         'Theodore Roosevelt': 'Theodore Roosevelt',
         'George Washington': 'George Washington',
-        'Abraham Lincoln': 'Abraham Lincoln'
+        'Abraham Lincoln': 'Abraham Lincoln',
+        'Benjamin Franklin': 'Benjamin Franklin',
+        'Thomas Jefferson': 'Thomas Jefferson',
+        'John Adams': 'John Adams',
+        'Theodore Roosevelt': 'Theodore Roosevelt',
+        'Franklin Roosevelt': 'Franklin D. Roosevelt',
+        'Ronald Reagan': 'Ronald Reagan',
+        'John Kennedy': 'John F. Kennedy',
+        'Lyndon Johnson': 'Lyndon B. Johnson',
+        'Richard Nixon': 'Richard Nixon',
+        'Jimmy Carter': 'Jimmy Carter',
+        'Bill Clinton': 'Bill Clinton',
+        'George Bush': 'George Bush',
+        'Barack Obama': 'Barack Obama',
+        'Donald Trump': 'Donald Trump',
+        'Joe Biden': 'Joe Biden'
     }
     
     return name_corrections.get(name, name)
@@ -163,7 +173,7 @@ def detect_face_opencv(name, url):
             "name": name,
             "url": url,
             "faces_detected": len(faces),
-            "face_coordinates": faces.tolist()  # Store face locations for future use
+            "face_coordinates": faces.tolist()
         }
         
     except Exception as e:
@@ -173,22 +183,18 @@ def detect_face_opencv(name, url):
 def save_results(historical_figures, face_data):
     """Save the URLs and face detection results"""
     try:
-        # Create output directory
-        face_data_dir = BASE_DIR / "face_data"
-        face_data_dir.mkdir(parents=True, exist_ok=True)
-        
         # Save URLs for Django app
-        urls_file = face_data_dir / "historical_figures_urls.json"
+        urls_file = OUTPUT_DIR / "historical_figures_urls.json"
         with open(urls_file, "w") as f:
             json.dump(historical_figures, f, indent=2)
         
         # Save face detection results
-        face_detection_file = face_data_dir / "face_detection_results.json"
+        face_detection_file = OUTPUT_DIR / "face_detection_results.json"
         with open(face_detection_file, "w") as f:
             json.dump(face_data, f, indent=2)
         
         # Save as Python dict for easy copying to Django
-        python_file = face_data_dir / "historical_figures_dict.py"
+        python_file = OUTPUT_DIR / "historical_figures_dict.py"
         with open(python_file, "w") as f:
             f.write("# Generated from /historical_figures folder using OpenCV\n")
             f.write("# Copy this dict to your Django views.py\n\n")
@@ -203,7 +209,7 @@ def save_results(historical_figures, face_data):
             if result:  # Only include figures where faces were detected
                 validated_figures[result['name']] = historical_figures[result['name']]
         
-        validated_file = face_data_dir / "validated_historical_figures.py"
+        validated_file = OUTPUT_DIR / "validated_historical_figures.py"
         with open(validated_file, "w") as f:
             f.write("# Historical figures with confirmed face detection\n")
             f.write("# These are ready to use in your Django app\n\n")
@@ -212,11 +218,11 @@ def save_results(historical_figures, face_data):
                 f.write(f'    "{name}": "{url}",\n')
             f.write("}\n")
         
-        print(f"\n💾 Files saved:")
-        print(f"  • All URLs: {urls_file}")
-        print(f"  • Face detection results: {face_detection_file}")
-        print(f"  • Python dict (all): {python_file}")
-        print(f"  • Validated figures only: {validated_file}")
+        print(f"\n💾 Files saved in {OUTPUT_DIR}:")
+        print(f"  • All URLs: historical_figures_urls.json")
+        print(f"  • Face detection results: face_detection_results.json")
+        print(f"  • Python dict (all): historical_figures_dict.py")
+        print(f"  • Validated figures only: validated_historical_figures.py")
         
         return True
         
@@ -225,10 +231,11 @@ def save_results(historical_figures, face_data):
         return False
 
 def main():
-    print("🚀 OpenCV Version - Cloudinary Historical Figures Fetcher")
-    print("=" * 65)
+    print("🚀 Simple Cloudinary Historical Figures Fetcher")
+    print("=" * 55)
     print(f"📁 Target: /historical_figures folder")
     print(f"🔍 Using: OpenCV for face detection")
+    print(f"📂 Output: {OUTPUT_DIR}")
     
     # Step 1: Fetch URLs from Cloudinary
     historical_figures = fetch_historical_figures_folder()
@@ -239,54 +246,54 @@ def main():
     
     print(f"\n📊 Found {len(historical_figures)} figures to process")
     
-    # Step 2: Validate faces using OpenCV
-    face_data = []
-    successful = 0
-    failed = 0
+    # Ask user if they want face validation or just URLs
+    print(f"\n🤔 Options:")
+    print(f"  1. Just get URLs (fast)")
+    print(f"  2. Get URLs + validate faces (slower)")
     
-    for i, (name, url) in enumerate(historical_figures.items(), 1):
-        print(f"\n[{i}/{len(historical_figures)}]", end=" ")
-        result = detect_face_opencv(name, url)
-        face_data.append(result)
+    choice = input("\nChoose option [1]: ").strip()
+    
+    if choice == "2":
+        print(f"\n🔍 Starting face validation...")
         
-        if result:
-            successful += 1
-        else:
-            failed += 1
-    
-    # Step 3: Save everything
-    save_results(historical_figures, [r for r in face_data if r])  # Only save successful detections
-    
-    print(f"\n🎉 PROCESSING COMPLETE!")
-    print(f"📊 Results:")
-    print(f"  • Total figures found: {len(historical_figures)}")
-    print(f"  • Faces successfully detected: {successful}")
-    print(f"  • No face detected: {failed}")
-    print(f"  • Success rate: {(successful/len(historical_figures)*100):.1f}%")
-    
-    # Show successful detections
-    print(f"\n✅ Figures with faces detected:")
-    for result in face_data:
-        if result:
-            faces_text = f"({result['faces_detected']} face{'s' if result['faces_detected'] > 1 else ''})"
-            print(f"  ✅ {result['name']} {faces_text}")
-    
-    # Show failed detections
-    if failed > 0:
-        print(f"\n❌ Figures where no face was detected:")
-        successful_names = {r['name'] for r in face_data if r}
-        for name in historical_figures:
-            if name not in successful_names:
-                print(f"  ❌ {name}")
+        # Step 2: Validate faces using OpenCV
+        face_data = []
+        successful = 0
+        failed = 0
+        
+        for i, (name, url) in enumerate(historical_figures.items(), 1):
+            print(f"\n[{i}/{len(historical_figures)}]", end=" ")
+            result = detect_face_opencv(name, url)
+            face_data.append(result)
+            
+            if result:
+                successful += 1
+            else:
+                failed += 1
+        
+        # Save everything
+        save_results(historical_figures, [r for r in face_data if r])
+        
+        print(f"\n🎉 PROCESSING COMPLETE!")
+        print(f"📊 Results:")
+        print(f"  • Total figures found: {len(historical_figures)}")
+        print(f"  • Faces successfully detected: {successful}")
+        print(f"  • No face detected: {failed}")
+        print(f"  • Success rate: {(successful/len(historical_figures)*100):.1f}%")
+        
+    else:
+        # Just save URLs without face validation
+        save_results(historical_figures, [])
+        
+        print(f"\n🎉 URLS EXTRACTED!")
+        print(f"📊 Results:")
+        print(f"  • Total figures found: {len(historical_figures)}")
+        print(f"  • All URLs saved successfully")
     
     print(f"\n🔄 Next Steps:")
-    print(f"  1. Use face_data/validated_historical_figures.py for immediate deployment")
-    print(f"  2. Copy the VALIDATED_HISTORICAL_FIGURES dict to your Django views.py")
-    print(f"  3. This gives you {successful} confirmed face-detectable figures!")
-    print(f"  4. For full face matching, you can install face_recognition later")
-    
-    print(f"\n💡 Note: This version detects faces but doesn't create embeddings.")
-    print(f"   For face matching, you'll still need the face_recognition library eventually.")
+    print(f"  1. Check the generated files in: {OUTPUT_DIR}")
+    print(f"  2. Copy HISTORICAL_FIGURES dict to your Django views.py")
+    print(f"  3. Replace your old 18-figure dict with the new {len(historical_figures)}-figure dict!")
 
 if __name__ == "__main__":
     main()

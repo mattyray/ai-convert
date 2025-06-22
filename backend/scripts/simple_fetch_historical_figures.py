@@ -1,4 +1,4 @@
-# simple_fetch_historical_figures.py - No Django dependencies!
+# root_level_fetch_historical_figures.py - Images are at root level, not in subfolders!
 
 import cv2
 import os
@@ -39,6 +39,7 @@ def clean_filename_to_name(filename):
     
     # Handle special cases and common corrections
     name_corrections = {
+        'Yoco Ono': 'Yoko Ono',  # Fix the typo in the filename
         'Jfk': 'JFK',
         'Mlk': 'Martin Luther King Jr.',
         'Fdr': 'Franklin D. Roosevelt',
@@ -72,157 +73,186 @@ def clean_filename_to_name(filename):
         'Abraham Lincoln': 'Abraham Lincoln',
         'Benjamin Franklin': 'Benjamin Franklin',
         'Thomas Jefferson': 'Thomas Jefferson',
-        'John Adams': 'John Adams',
-        'Theodore Roosevelt': 'Theodore Roosevelt',
+        'Xi Jinping': 'Xi Jinping',
+        'Vladimir Putin': 'Vladimir Putin',
+        'Donald Trump': 'Donald Trump',
+        'Joe Biden': 'Joe Biden',
+        'Barack Obama': 'Barack Obama',
+        'John Lennon': 'John Lennon',
+        'Paul Mccartney': 'Paul McCartney',
+        'George Harrison': 'George Harrison',
+        'Ringo Starr': 'Ringo Starr',
+        'Mao Zedong': 'Mao Zedong',
+        'Joseph Stalin': 'Joseph Stalin',
+        'Adolf Hitler': 'Adolf Hitler',
+        'Benito Mussolini': 'Benito Mussolini',
         'Franklin Roosevelt': 'Franklin D. Roosevelt',
+        'Theodore Roosevelt': 'Theodore Roosevelt',
         'Ronald Reagan': 'Ronald Reagan',
-        'John Kennedy': 'John F. Kennedy',
-        'Lyndon Johnson': 'Lyndon B. Johnson',
-        'Richard Nixon': 'Richard Nixon',
-        'Jimmy Carter': 'Jimmy Carter',
         'Bill Clinton': 'Bill Clinton',
         'George Bush': 'George Bush',
-        'Barack Obama': 'Barack Obama',
-        'Donald Trump': 'Donald Trump',
-        'Joe Biden': 'Joe Biden'
+        'Jimmy Carter': 'Jimmy Carter',
+        'Lyndon Johnson': 'Lyndon B. Johnson',
+        'Richard Nixon': 'Richard Nixon'
     }
     
     return name_corrections.get(name, name)
 
-def fetch_historical_figures_folder():
-    """Fetch all images from the /historical_figures folder"""
+def is_historical_figure(public_id):
+    """
+    Determine if a public_id looks like a historical figure
+    Based on common patterns and names
+    """
+    filename = public_id.lower()
+    
+    # Skip obviously non-historical files
+    skip_patterns = [
+        'selfie', 'fused', 'result', 'generated', 'temp', 'test',
+        'upload', 'sample', 'demo', 'placeholder', 'avatar',
+        'profile', 'user', 'photo', 'pic', 'img'
+    ]
+    
+    if any(pattern in filename for pattern in skip_patterns):
+        return False
+    
+    # Look for historical figure patterns
+    historical_patterns = [
+        # World Leaders & Politicians
+        'lincoln', 'washington', 'jefferson', 'franklin', 'roosevelt', 'kennedy', 'jfk',
+        'reagan', 'clinton', 'obama', 'trump', 'biden', 'carter', 'nixon', 'johnson',
+        'churchill', 'gandhi', 'mandela', 'putin', 'xi_jinping', 'mao', 'stalin',
+        'hitler', 'mussolini', 'napoleon', 'caesar', 'alexander', 'cleopatra',
+        
+        # Scientists & Inventors
+        'einstein', 'newton', 'tesla', 'edison', 'darwin', 'galileo', 'curie',
+        'hawking', 'jobs', 'gates', 'musk', 'zuckerberg', 'bezos',
+        
+        # Artists & Musicians
+        'picasso', 'davinci', 'van_gogh', 'monet', 'warhol', 'kahlo', 'haring',
+        'mozart', 'beethoven', 'bach', 'elvis', 'lennon', 'mccartney', 'hendrix',
+        'dylan', 'cash', 'presley', 'monroe', 'dean', 'yoko', 'ono',
+        
+        # Writers & Philosophers
+        'shakespeare', 'dickens', 'twain', 'hemingway', 'orwell', 'tolkien',
+        'plato', 'aristotle', 'socrates', 'nietzsche', 'kant',
+        
+        # Religious & Cultural Figures
+        'jesus', 'buddha', 'muhammad', 'confucius', 'dalai_lama',
+        'mother_teresa', 'joan', 'arc', 'marie_antoinette',
+        
+        # Civil Rights & Social Leaders
+        'mlk', 'malcolm', 'che', 'guevara', 'king', 'luther', 'parks',
+        'douglass', 'tubman', 'anthony'
+    ]
+    
+    # Check if any historical pattern matches
+    for pattern in historical_patterns:
+        if pattern in filename:
+            return True
+    
+    # Also check for single names that might be historical
+    # If it's a simple name pattern (no numbers, no technical terms)
+    if re.match(r'^[a-z_]+_[a-z0-9]{6}$', filename):  # name_cloudinaryid pattern
+        name_part = filename.split('_')[0]
+        if len(name_part) > 3:  # Reasonable name length
+            return True
+    
+    return False
+
+def fetch_all_images_and_filter():
+    """Get all images and filter for historical figures"""
+    
+    print("🌤️ Fetching ALL images from Cloudinary root...")
+    
     try:
-        print("🌤️ Fetching from /historical_figures folder...")
+        all_resources = []
+        next_cursor = None
         
-        # Search for resources in the specific folder
-        response = cloudinary.api.resources(
-            resource_type="image",
-            type="upload",
-            prefix="historical_figures/",
-            max_results=500
-        )
+        while True:
+            params = {
+                "resource_type": "image",
+                "type": "upload",
+                "max_results": 500
+            }
+            if next_cursor:
+                params["next_cursor"] = next_cursor
+            
+            response = cloudinary.api.resources(**params)
+            batch = response.get('resources', [])
+            all_resources.extend(batch)
+            
+            print(f"📄 Fetched {len(all_resources)} total images...")
+            
+            if 'next_cursor' in response:
+                next_cursor = response['next_cursor']
+            else:
+                break
         
-        resources = response['resources']
-        print(f"✅ Found {len(resources)} images in /historical_figures folder")
+        print(f"✅ Found {len(all_resources)} total images in account")
         
-        historical_figures = {}
+        # Filter for historical figures
+        historical_resources = []
         
-        for resource in resources:
-            try:
-                public_id = resource['public_id']
-                
-                # Remove the folder prefix: "historical_figures/einstein" -> "einstein"
-                filename = public_id.replace('historical_figures/', '')
-                
-                if not filename:
-                    continue
-                
-                # Clean up the name
-                clean_name = clean_filename_to_name(filename)
-                url = resource['secure_url']
-                
-                historical_figures[clean_name] = url
-                print(f"📸 {clean_name}")
-                
-            except Exception as e:
-                print(f"⚠️ Error processing {resource.get('public_id', 'unknown')}: {e}")
-                continue
+        print(f"\n🎭 Filtering for historical figures...")
+        for resource in all_resources:
+            public_id = resource['public_id']
+            
+            if is_historical_figure(public_id):
+                historical_resources.append(resource)
+                print(f"✅ Historical figure: {public_id}")
         
-        print(f"\n🎭 Successfully mapped {len(historical_figures)} historical figures")
-        return historical_figures
+        print(f"\n🎯 Found {len(historical_resources)} historical figures!")
+        return historical_resources
         
     except Exception as e:
-        print(f"❌ Error fetching from Cloudinary folder: {e}")
-        return {}
+        print(f"❌ Error fetching images: {e}")
+        return []
 
-def detect_face_opencv(name, url):
-    """Download image and detect faces using OpenCV"""
-    try:
-        print(f"📥 Processing {name}...")
-        
-        # Download image
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        
-        # Convert to OpenCV format
-        nparr = np.frombuffer(response.content, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        if image is None:
-            print(f"❌ Could not decode image for {name}")
-            return None
-        
-        # Convert to grayscale for face detection
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Load the face detection classifier
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        
-        # Detect faces
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-        
-        if len(faces) == 0:
-            print(f"❌ No face detected in {name}")
-            return None
-        
-        if len(faces) > 1:
-            print(f"⚠️  Multiple faces detected in {name} ({len(faces)} faces)")
-        
-        print(f"✅ Face detected in {name}")
-        return {
-            "name": name,
-            "url": url,
-            "faces_detected": len(faces),
-            "face_coordinates": faces.tolist()
-        }
-        
-    except Exception as e:
-        print(f"❌ Error processing {name}: {str(e)}")
-        return None
+def organize_historical_figures(resources):
+    """Process the resources and create clean name mappings"""
+    historical_figures = {}
+    
+    print(f"\n🎭 Processing {len(resources)} historical figures...")
+    
+    for resource in resources:
+        try:
+            public_id = resource['public_id']
+            
+            # Clean up the name
+            clean_name = clean_filename_to_name(public_id)
+            url = resource['secure_url']
+            
+            historical_figures[clean_name] = url
+            print(f"📸 {public_id} → {clean_name}")
+            
+        except Exception as e:
+            print(f"⚠️ Error processing {resource.get('public_id', 'unknown')}: {e}")
+            continue
+    
+    return historical_figures
 
-def save_results(historical_figures, face_data):
-    """Save the URLs and face detection results"""
+def save_results(historical_figures):
+    """Save the URLs in multiple formats"""
     try:
-        # Save URLs for Django app
+        # Save URLs as JSON
         urls_file = OUTPUT_DIR / "historical_figures_urls.json"
         with open(urls_file, "w") as f:
             json.dump(historical_figures, f, indent=2)
         
-        # Save face detection results
-        face_detection_file = OUTPUT_DIR / "face_detection_results.json"
-        with open(face_detection_file, "w") as f:
-            json.dump(face_data, f, indent=2)
-        
-        # Save as Python dict for easy copying to Django
+        # Save as Python dict for Django
         python_file = OUTPUT_DIR / "historical_figures_dict.py"
         with open(python_file, "w") as f:
-            f.write("# Generated from /historical_figures folder using OpenCV\n")
-            f.write("# Copy this dict to your Django views.py\n\n")
+            f.write("# Generated from Cloudinary root level\n")
+            f.write("# Copy this dict to your Django views.py\n")
+            f.write("# Replace your old HISTORICAL_FIGURES dictionary with this:\n\n")
             f.write("HISTORICAL_FIGURES = {\n")
             for name, url in sorted(historical_figures.items()):
                 f.write(f'    "{name}": "{url}",\n')
             f.write("}\n")
         
-        # Save only the successfully detected faces for immediate use
-        validated_figures = {}
-        for result in face_data:
-            if result:  # Only include figures where faces were detected
-                validated_figures[result['name']] = historical_figures[result['name']]
-        
-        validated_file = OUTPUT_DIR / "validated_historical_figures.py"
-        with open(validated_file, "w") as f:
-            f.write("# Historical figures with confirmed face detection\n")
-            f.write("# These are ready to use in your Django app\n\n")
-            f.write("VALIDATED_HISTORICAL_FIGURES = {\n")
-            for name, url in sorted(validated_figures.items()):
-                f.write(f'    "{name}": "{url}",\n')
-            f.write("}\n")
-        
         print(f"\n💾 Files saved in {OUTPUT_DIR}:")
-        print(f"  • All URLs: historical_figures_urls.json")
-        print(f"  • Face detection results: face_detection_results.json")
-        print(f"  • Python dict (all): historical_figures_dict.py")
-        print(f"  • Validated figures only: validated_historical_figures.py")
+        print(f"  • JSON format: historical_figures_urls.json")
+        print(f"  • Python dict: historical_figures_dict.py")
         
         return True
         
@@ -231,69 +261,47 @@ def save_results(historical_figures, face_data):
         return False
 
 def main():
-    print("🚀 Simple Cloudinary Historical Figures Fetcher")
-    print("=" * 55)
-    print(f"📁 Target: /historical_figures folder")
-    print(f"🔍 Using: OpenCV for face detection")
+    print("🚀 Root Level Historical Figures Fetcher")
+    print("=" * 50)
+    print(f"📁 Target: Root level images (not in subfolders)")
     print(f"📂 Output: {OUTPUT_DIR}")
+    print(f"🔍 Strategy: Get all images, filter for historical figures")
     
-    # Step 1: Fetch URLs from Cloudinary
-    historical_figures = fetch_historical_figures_folder()
+    # Step 1: Fetch all images and filter
+    resources = fetch_all_images_and_filter()
     
-    if not historical_figures:
+    if not resources:
         print("❌ No historical figures found!")
+        print("💡 The images might have different naming patterns")
         return
     
-    print(f"\n📊 Found {len(historical_figures)} figures to process")
+    # Step 2: Process and organize the figures
+    historical_figures = organize_historical_figures(resources)
     
-    # Ask user if they want face validation or just URLs
-    print(f"\n🤔 Options:")
-    print(f"  1. Just get URLs (fast)")
-    print(f"  2. Get URLs + validate faces (slower)")
+    if not historical_figures:
+        print("❌ No historical figures could be processed!")
+        return
     
-    choice = input("\nChoose option [1]: ").strip()
+    # Step 3: Save the results
+    save_results(historical_figures)
     
-    if choice == "2":
-        print(f"\n🔍 Starting face validation...")
-        
-        # Step 2: Validate faces using OpenCV
-        face_data = []
-        successful = 0
-        failed = 0
-        
-        for i, (name, url) in enumerate(historical_figures.items(), 1):
-            print(f"\n[{i}/{len(historical_figures)}]", end=" ")
-            result = detect_face_opencv(name, url)
-            face_data.append(result)
-            
-            if result:
-                successful += 1
-            else:
-                failed += 1
-        
-        # Save everything
-        save_results(historical_figures, [r for r in face_data if r])
-        
-        print(f"\n🎉 PROCESSING COMPLETE!")
-        print(f"📊 Results:")
-        print(f"  • Total figures found: {len(historical_figures)}")
-        print(f"  • Faces successfully detected: {successful}")
-        print(f"  • No face detected: {failed}")
-        print(f"  • Success rate: {(successful/len(historical_figures)*100):.1f}%")
-        
-    else:
-        # Just save URLs without face validation
-        save_results(historical_figures, [])
-        
-        print(f"\n🎉 URLS EXTRACTED!")
-        print(f"📊 Results:")
-        print(f"  • Total figures found: {len(historical_figures)}")
-        print(f"  • All URLs saved successfully")
+    print(f"\n🎉 SUCCESS!")
+    print(f"📊 Results:")
+    print(f"  • Historical figures found: {len(historical_figures)}")
+    print(f"  • All URLs extracted and organized")
     
     print(f"\n🔄 Next Steps:")
-    print(f"  1. Check the generated files in: {OUTPUT_DIR}")
-    print(f"  2. Copy HISTORICAL_FIGURES dict to your Django views.py")
-    print(f"  3. Replace your old 18-figure dict with the new {len(historical_figures)}-figure dict!")
+    print(f"  1. Open: {OUTPUT_DIR}/historical_figures_dict.py")
+    print(f"  2. Copy the HISTORICAL_FIGURES dictionary")
+    print(f"  3. Replace your old 18-figure dict in Django views.py")
+    print(f"  4. Deploy with {len(historical_figures)} historical figures! 🚀")
+    
+    # Show a preview
+    print(f"\n📋 Preview of figures found:")
+    for i, name in enumerate(sorted(historical_figures.keys())[:15]):
+        print(f"  {i+1}. {name}")
+    if len(historical_figures) > 15:
+        print(f"  ... and {len(historical_figures) - 15} more!")
 
 if __name__ == "__main__":
     main()

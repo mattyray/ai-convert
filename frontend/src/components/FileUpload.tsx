@@ -81,8 +81,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
       className={`
         border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200
         ${isDragActive 
-          ? 'border-primary-500 bg-primary-50' 
-          : 'border-gray-300 hover:border-primary-400 hover:bg-gray-50'
+          ? 'border-blue-500 bg-blue-50' 
+          : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
         }
         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
       `}
@@ -92,7 +92,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       <div className="space-y-4">
         <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
           {isDragActive ? (
-            <Upload className="w-8 h-8 text-primary-500" />
+            <Upload className="w-8 h-8 text-blue-500" />
           ) : (
             <ImageIcon className="w-8 h-8 text-gray-400" />
           )}

@@ -47,7 +47,7 @@ class ErrorBoundary extends Component<Props, State> {
             <div className="space-y-4">
               <button
                 onClick={this.handleReset}
-                className="btn-primary w-full flex items-center justify-center gap-2"
+                className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 <RefreshCw size={20} />
                 Try Again
@@ -55,7 +55,7 @@ class ErrorBoundary extends Component<Props, State> {
               
               <button
                 onClick={() => window.location.reload()}
-                className="btn-secondary w-full"
+                className="w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg border border-gray-300 hover:border-gray-400 transition-colors"
               >
                 Reload Page
               </button>

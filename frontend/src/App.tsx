@@ -4,7 +4,7 @@ import FileUpload from './components/FileUpload';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultDisplay from './components/ResultDisplay';
 import { FaceSwapAPI } from './services/api';
-import { FaceSwapResult } from './types';
+import type { FaceSwapResult } from './types/index';
 
 type AppState = 'upload' | 'processing' | 'result' | 'error';
 

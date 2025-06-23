@@ -1,6 +1,6 @@
 import React from 'react';
 import { Download, RefreshCw, Share2, Star } from 'lucide-react';
-import { FaceSwapResult } from '../types';
+import type { FaceSwapResult } from '../types/index';
 
 interface ResultDisplayProps {
   result: FaceSwapResult;

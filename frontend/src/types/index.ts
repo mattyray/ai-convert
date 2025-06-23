@@ -1,26 +1,75 @@
-export interface FaceSwapResult {
-  id: number;
-  match_name: string;
-  match_score: number;
-  message: string;
-  output_image_url: string;
-  original_selfie_url: string;
-  historical_figure_url: string;
+@import "tailwindcss";
+
+/* Reset and base styles */
+* {
+  box-sizing: border-box;
 }
 
-export interface ApiError {
-  error: string;
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-export interface UploadProgress {
-  step: 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
-  progress: number;
-  message: string;
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-export interface HistoricalFigure {
-  name: string;
-  description: string;
-  imageUrl: string;
-  confidence?: number;
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Custom component classes */
+@layer components {
+  .btn-primary {
+    @apply bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+  }
+  
+  .btn-secondary {
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg border border-gray-300 hover:border-gray-400 transition-all duration-200 shadow-sm hover:shadow-md;
+  }
+  
+  .btn-danger {
+    @apply bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl;
+  }
+}
+
+/* Custom animations */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Ensure proper styling for file upload */
+.dropzone {
+  border: 2px dashed #d1d5db;
+  border-radius: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dropzone:hover {
+  border-color: #6366f1;
+  background-color: #f9fafb;
+}
+
+.dropzone.active {
+  border-color: #6366f1;
+  background-color: #eff6ff;
 }

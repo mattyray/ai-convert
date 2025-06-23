@@ -1,0 +1,40 @@
+.
+├── Dockerfile
+├── Dockerfile.dev
+├── eslint.config.js
+├── fly.toml
+├── frontend_structure.txt
+├── index.html
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── public
+│   └── vite.svg
+├── README.md
+├── scripts
+│   ├── front_export.py
+│   └── frontend_code_snapshot.txt
+├── src
+│   ├── App.css
+│   ├── App.tsx
+│   ├── assets
+│   │   └── react.svg
+│   ├── components
+│   │   ├── ErrorBoundary.tsx
+│   │   ├── FileUpload.tsx
+│   │   ├── ProcessingStatus.tsx
+│   │   └── ResultDisplay.tsx
+│   ├── index.css
+│   ├── main.tsx
+│   ├── services
+│   │   └── api.ts
+│   ├── types
+│   │   └── index.ts
+│   └── vite-env.d.ts
+├── tailwind.config.js
+├── tsconfig.app.json
+├── tsconfig.json
+├── tsconfig.node.json
+└── vite.config.ts
+
+8 directories, 30 files

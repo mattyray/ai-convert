@@ -4,10 +4,21 @@ import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
 import './index.css'
 
-createRoot(document.getElementById('root')!).render(
+console.log('🚀 main.tsx loading...');
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('Root element not found');
+}
+
+console.log('✅ Root element found, mounting React app...');
+
+createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
-  </StrictMode>,
-)
+  </StrictMode>
+);
+
+console.log('✅ React app mounted successfully!');

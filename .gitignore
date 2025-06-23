@@ -1,5 +1,23 @@
+# Your existing patterns (with fixes)
 .venv
 __pycache__/
 db.sqlite3
 .DS_Store
-\.env 
+.env
+
+# ===== SECURITY: Frontend environment files =====
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# ===== Frontend build artifacts =====
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.local
+
+# ===== Additional security patterns =====
+**/.env.local
+**/secrets.json

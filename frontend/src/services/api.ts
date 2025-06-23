@@ -1,14 +1,21 @@
 import axios from 'axios';
 import type { FaceSwapResult, ApiError } from '../types/index';
 
-// Use environment variables or fallback to dev defaults
+// Read from environment variables (from .env.local file)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8002/api';
-const API_TOKEN = import.meta.env.VITE_API_TOKEN || '90cc43ca30091f85a96b4ce3647ffa7b0f46e8f3';
+const API_TOKEN = import.meta.env.VITE_API_TOKEN;
+
+// Debug: Check if token is loaded
+if (!API_TOKEN) {
+  console.error('❌ API Token not found! Make sure frontend/.env.local exists with VITE_API_TOKEN');
+} else {
+  console.log('✅ API Token loaded:', API_TOKEN.substring(0, 8) + '...');
+}
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
-    'Authorization': `Token ${API_TOKEN}`,
+    'Authorization': API_TOKEN ? `Token ${API_TOKEN}` : '',
   },
   timeout: 300000, // 5 minutes for face swap processing
 });
@@ -36,6 +43,10 @@ export class FaceSwapAPI {
     selfieFile: File,
     onProgress?: (progress: number) => void
   ): Promise<FaceSwapResult> {
+    if (!API_TOKEN) {
+      throw new Error('API token not configured. Please create frontend/.env.local file with VITE_API_TOKEN.');
+    }
+
     const formData = new FormData();
     formData.append('selfie', selfieFile);
 
@@ -65,7 +76,7 @@ export class FaceSwapAPI {
         }
         
         if (error.response?.status === 401) {
-          throw new Error('Authentication failed. Please check your API token.');
+          throw new Error('Authentication failed. Check your API token in .env.local file.');
         }
         
         if (error.response?.status === 413) {

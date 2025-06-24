@@ -86,31 +86,4 @@
 │   ├── test_cloudinary_upload.py
 │   └── uploads
 │       └── selfies
-├── docker.sh
-├── frontend
-│   ├── Dockerfile
-│   ├── Dockerfile.dev
-│   ├── eslint.config.js
-│   ├── fly.toml
-│   ├── index.html
-│   ├── package-lock.json
-│   ├── package.json
-│   ├── postcss.config.js
-│   ├── public
-│   ├── scripts
-│   │   └── front_export.py
-│   ├── src
-│   │   ├── App.css
-│   │   ├── assets
-│   │   ├── components
-│   │   ├── index.css
-│   │   ├── services
-│   │   └── types
-│   ├── tailwind.config.js
-│   ├── tsconfig.app.json
-│   ├── tsconfig.json
-│   └── tsconfig.node.json
-├── package-lock.json
-└── test_facefusion_client.py
-
-32 directories, 82 files
+-frontend

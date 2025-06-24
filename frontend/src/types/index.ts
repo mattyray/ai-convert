@@ -12,8 +12,10 @@ export interface ApiError {
   error: string;
 }
 
+export type ProgressStep = 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+
 export interface UploadProgress {
-  step: 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+  step: ProgressStep;
   progress: number;
   message: string;
 }

@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Sparkles, AlertCircle, History } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultDisplay from './components/ResultDisplay';
 import { FaceSwapAPI } from './services/api';
-import type { FaceSwapResult } from './types/index';
+import type { FaceSwapResult, ProgressStep } from './types/index';
 
 type AppState = 'upload' | 'processing' | 'result' | 'error';
 
@@ -14,7 +14,7 @@ function App() {
   const [result, setResult] = useState<FaceSwapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState({
-    step: 'uploading' as const,
+    step: 'uploading' as ProgressStep,
     progress: 0,
     message: 'Preparing your transformation...',
     matchedFigure: undefined as string | undefined,
@@ -38,7 +38,7 @@ function App() {
     
     try {
       // Simulate processing steps for better UX
-      const updateProgress = (step: typeof processing.step, progress: number, message: string, matchedFigure?: string) => {
+      const updateProgress = (step: ProgressStep, progress: number, message: string, matchedFigure?: string) => {
         setProcessing({ step, progress, message, matchedFigure });
       };
 

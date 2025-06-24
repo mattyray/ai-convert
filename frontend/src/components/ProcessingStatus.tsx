@@ -1,8 +1,8 @@
-import React from 'react';
 import { Loader2, Search, Users, Sparkles, CheckCircle } from 'lucide-react';
+import type { ProgressStep } from '../types/index';
 
 interface ProcessingStatusProps {
-  step: 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+  step: ProgressStep;
   progress: number;
   message: string;
   matchedFigure?: string;
@@ -90,7 +90,7 @@ const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
 
       {/* Steps */}
       <div className="space-y-4">
-        {steps.map((stepItem, index) => {
+        {steps.map((stepItem) => {
           const status = getStepStatus(stepItem.key);
           const Icon = stepItem.icon;
           

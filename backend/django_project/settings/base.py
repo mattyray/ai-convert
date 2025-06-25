@@ -245,12 +245,39 @@ HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
 print(f"🔧 HuggingFace Space: {HUGGINGFACE_SPACE_NAME}")
 print(f"🔑 HuggingFace Token: {'***configured***' if HUGGINGFACE_API_TOKEN != 'dummy' else 'NOT SET'}")
 
+# 🔥 FIXED CORS CONFIGURATION 🔥
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:5173",
-    "https://*.netlify.app",  # Will be updated with actual Netlify URL
-    "https://*.fly.dev",      # Allow all fly.dev subdomains
+    "http://localhost:3000",  # React dev server
+    "https://ai-convert.netlify.app",  # Your specific Netlify URL
 ]
 
+# Add these additional CORS settings
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = False  # Keep this False for security
 
+# Add specific headers that your frontend needs
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# Allow these HTTP methods
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+print(f"🌐 CORS configured for origins: {CORS_ALLOWED_ORIGINS}")

@@ -541,4 +541,4 @@ docker-compose logs frontend
 
 ---
 
-Built with ❤️ using modern web technologies and AI
+Built with ❤️ using modern web technologies and AI. Don't hate ma hands dont work

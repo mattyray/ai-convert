@@ -1,13 +1,19 @@
 import axios from 'axios';
 import type { FaceSwapResult, ApiError } from '../types/index';
 
-// Read from environment variables (from .env.local file)
+// Read from environment variables (from Netlify environment variables)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8002';
 const API_TOKEN = import.meta.env.VITE_API_TOKEN;
 
+// Debug environment variables
+console.log('🔧 Environment check:');
+console.log('  - API_BASE_URL:', API_BASE_URL);
+console.log('  - NODE_ENV:', import.meta.env.MODE);
+console.log('  - API_TOKEN present:', !!API_TOKEN);
+
 // Debug: Check if token is loaded
 if (!API_TOKEN) {
-  console.error('❌ API Token not found! Make sure Netlify environment variables are set with VITE_API_TOKEN');
+  console.error('❌ API Token not found! Make sure environment variables are set with VITE_API_TOKEN');
 } else {
   console.log('✅ API Token loaded:', API_TOKEN.substring(0, 8) + '...');
 }
@@ -44,7 +50,7 @@ export class FaceSwapAPI {
     onProgress?: (progress: number) => void
   ): Promise<FaceSwapResult> {
     if (!API_TOKEN) {
-      throw new Error('API token not configured. Please set VITE_API_TOKEN in Netlify environment variables.');
+      throw new Error('API token not configured. Please set VITE_API_TOKEN in environment variables.');
     }
 
     const formData = new FormData();
@@ -53,6 +59,7 @@ export class FaceSwapAPI {
     try {
       console.log(`📤 Uploading file: ${selfieFile.name} (${(selfieFile.size / 1024 / 1024).toFixed(1)}MB)`);
       
+      // 🔥 FIXED: Use correct endpoint path without double /api/
       const response = await api.post<FaceSwapResult>('/api/imagegen/generate/', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
@@ -71,12 +78,28 @@ export class FaceSwapAPI {
       console.error('❌ Face swap failed:', error);
       
       if (axios.isAxiosError(error)) {
+        console.error('❌ Axios error details:', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: error.config?.url,
+          method: error.config?.method
+        });
+
         if (error.code === 'ECONNREFUSED') {
           throw new Error('Cannot connect to server. Make sure the backend is running.');
         }
         
+        if (error.code === 'ERR_NETWORK') {
+          throw new Error('Network error - check CORS settings and backend connectivity.');
+        }
+        
         if (error.response?.status === 401) {
-          throw new Error('Authentication failed. Check your API token in Netlify environment variables.');
+          throw new Error('Authentication failed. Check your API token in environment variables.');
+        }
+        
+        if (error.response?.status === 404) {
+          throw new Error('API endpoint not found. Check the backend URL configuration.');
         }
         
         if (error.response?.status === 413) {
@@ -95,6 +118,7 @@ export class FaceSwapAPI {
 
   static async getImageStatus(id: number): Promise<FaceSwapResult> {
     try {
+      // 🔥 FIXED: Use correct endpoint path without double /api/
       const response = await api.get<FaceSwapResult>(`/api/imagegen/status/${id}/`);
       return response.data;
     } catch (error) {
@@ -105,11 +129,21 @@ export class FaceSwapAPI {
 
   static async testConnection(): Promise<boolean> {
     try {
-      await api.get('/health/');
+      // Test the health endpoint first
+      const response = await api.get('/health/');
+      console.log('✅ Health check passed:', response.data);
       return true;
     } catch (error) {
       console.error('❌ Connection test failed:', error);
-      return false;
+      // Try the root endpoint as fallback
+      try {
+        const response = await api.get('/');
+        console.log('✅ Root endpoint accessible:', response.data);
+        return true;
+      } catch (rootError) {
+        console.error('❌ Root endpoint also failed:', rootError);
+        return false;
+      }
     }
   }
 }

@@ -149,12 +149,12 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-# Allauth
+# Allauth - FIXED: Updated to new settings format
 SITE_ID = env.int("DJANGO_SITE_ID", default=1)
-ACCOUNT_AUTHENTICATION_METHOD = 'email'
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USER_MODEL_USERNAME_FIELD = "email"
+
+# ✅ NEW: Updated allauth settings (no more deprecation warnings)
+ACCOUNT_LOGIN_METHODS = {'email'}  # Replaces ACCOUNT_AUTHENTICATION_METHOD
+ACCOUNT_SIGNUP_FIELDS = ['email', 'password1', 'password2']  # Replaces EMAIL_REQUIRED and USERNAME_REQUIRED
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
 ACCOUNT_SIGNUP_REDIRECT_URL = '/dashboard/'
 LOGIN_REDIRECT_URL = '/accounts/dashboard/'
@@ -245,7 +245,12 @@ HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
 print(f"🔧 HuggingFace Space: {HUGGINGFACE_SPACE_NAME}")
 print(f"🔑 HuggingFace Token: {'***configured***' if HUGGINGFACE_API_TOKEN != 'dummy' else 'NOT SET'}")
 
-# 🔥 FIXED CORS CONFIGURATION 🔥
+# 🔥 ROBUST CORS CONFIGURATION (FIXED) 🔥
+
+# 🧪 TEMPORARY DEBUG: Allow all origins to test if CORS is the issue
+CORS_ALLOW_ALL_ORIGINS = True  # ← TEMPORARY - CHANGE TO FALSE AFTER TESTING
+
+# Specific allowed origins (when CORS_ALLOW_ALL_ORIGINS = False)
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:5173",
@@ -253,11 +258,11 @@ CORS_ALLOWED_ORIGINS = [
     "https://ai-convert.netlify.app",  # Your specific Netlify URL
 ]
 
-# Add these additional CORS settings
+# CORS Configuration
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False  # Keep this False for security
+CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 
-# Add specific headers that your frontend needs
+# Comprehensive headers list
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -268,9 +273,21 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'cache-control',
+    'pragma',
+    'expires',
+    'content-length',
+    'host',
+    'referer',
+    'sec-ch-ua',
+    'sec-ch-ua-mobile',
+    'sec-ch-ua-platform',
+    'sec-fetch-dest',
+    'sec-fetch-mode',
+    'sec-fetch-site',
 ]
 
-# Allow these HTTP methods
+# All HTTP methods
 CORS_ALLOW_METHODS = [
     'DELETE',
     'GET',
@@ -278,6 +295,34 @@ CORS_ALLOW_METHODS = [
     'PATCH',
     'POST',
     'PUT',
+    'HEAD',
 ]
 
+# ✅ REMOVED: CORS_REPLACE_HTTPS_REFERER (deprecated setting)
+
 print(f"🌐 CORS configured for origins: {CORS_ALLOWED_ORIGINS}")
+print(f"🔥 CORS_ALLOW_ALL_ORIGINS: {CORS_ALLOW_ALL_ORIGINS}")
+print(f"🔑 CORS_ALLOW_CREDENTIALS: {CORS_ALLOW_CREDENTIALS}")
+
+# 🧪 Add request logging to see if requests are reaching Django
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'corsheaders': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+    },
+}

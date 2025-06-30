@@ -156,8 +156,8 @@ console_command = "/code/manage.py shell"
   internal_port = 8000
   force_https = true
   auto_start_machines = true
-  auto_stop_machines = "stop"
-  min_machines_running = 0
+  auto_stop_machines = false        # ← CHANGED: Disable auto-stopping
+  min_machines_running = 2          # ← CHANGED: Keep 2 machines running
   processes = ["app"]
 
   [http_service.concurrency]
@@ -174,7 +174,7 @@ console_command = "/code/manage.py shell"
   guest_path = "/code/static"
   url_prefix = "/static/"
 
-# Postgres internal service (Flycast resolution)
+# Postgres internal service (Flycast resolution) - LEAVE THIS AS-IS
 [[services]]
   internal_port = 5432
   protocol = "tcp"
@@ -190,7 +190,6 @@ console_command = "/code/manage.py shell"
   [[services.ports]]
     port = 5432
     handlers = ["pg_tls"]
-
 ```
 
 ## manage.py
@@ -2268,12 +2267,12 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-# Allauth
+# Allauth - FIXED: Updated to new settings format
 SITE_ID = env.int("DJANGO_SITE_ID", default=1)
-ACCOUNT_AUTHENTICATION_METHOD = 'email'
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USER_MODEL_USERNAME_FIELD = "email"
+
+# ✅ NEW: Updated allauth settings (no more deprecation warnings)
+ACCOUNT_LOGIN_METHODS = {'email'}  # Replaces ACCOUNT_AUTHENTICATION_METHOD
+ACCOUNT_SIGNUP_FIELDS = ['email', 'password1', 'password2']  # Replaces EMAIL_REQUIRED and USERNAME_REQUIRED
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
 ACCOUNT_SIGNUP_REDIRECT_URL = '/dashboard/'
 LOGIN_REDIRECT_URL = '/accounts/dashboard/'
@@ -2364,16 +2363,87 @@ HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
 print(f"🔧 HuggingFace Space: {HUGGINGFACE_SPACE_NAME}")
 print(f"🔑 HuggingFace Token: {'***configured***' if HUGGINGFACE_API_TOKEN != 'dummy' else 'NOT SET'}")
 
+# 🔥 ROBUST CORS CONFIGURATION (FIXED) 🔥
+
+# 🧪 TEMPORARY DEBUG: Allow all origins to test if CORS is the issue
+CORS_ALLOW_ALL_ORIGINS = True  # ← TEMPORARY - CHANGE TO FALSE AFTER TESTING
+
+# Specific allowed origins (when CORS_ALLOW_ALL_ORIGINS = False)
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:5173",
-    "https://*.netlify.app",  # Will be updated with actual Netlify URL
-    "https://*.fly.dev",      # Allow all fly.dev subdomains
+    "http://localhost:3000",  # React dev server
+    "https://ai-convert.netlify.app",  # Your specific Netlify URL
 ]
 
+# CORS Configuration
 CORS_ALLOW_CREDENTIALS = True
+CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 
+# Comprehensive headers list
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'cache-control',
+    'pragma',
+    'expires',
+    'content-length',
+    'host',
+    'referer',
+    'sec-ch-ua',
+    'sec-ch-ua-mobile',
+    'sec-ch-ua-platform',
+    'sec-fetch-dest',
+    'sec-fetch-mode',
+    'sec-fetch-site',
+]
 
+# All HTTP methods
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+    'HEAD',
+]
+
+# ✅ REMOVED: CORS_REPLACE_HTTPS_REFERER (deprecated setting)
+
+print(f"🌐 CORS configured for origins: {CORS_ALLOWED_ORIGINS}")
+print(f"🔥 CORS_ALLOW_ALL_ORIGINS: {CORS_ALLOW_ALL_ORIGINS}")
+print(f"🔑 CORS_ALLOW_CREDENTIALS: {CORS_ALLOW_CREDENTIALS}")
+
+# 🧪 Add request logging to see if requests are reaching Django
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'corsheaders': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+    },
+}
 ```
 
 ## Dockerfile

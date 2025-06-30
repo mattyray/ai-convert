@@ -1,6 +1,6 @@
 # FRONTEND CODE SNAPSHOT
 # Generated for AI Face Swap App
-# Total files: 26
+# Total files: 27
 
 
 
@@ -31,8 +31,10 @@ export interface ApiError {
   error: string;
 }
 
+export type ProgressStep = 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+
 export interface UploadProgress {
-  step: 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+  step: ProgressStep;
   progress: number;
   message: string;
 }
@@ -49,34 +51,47 @@ export interface HistoricalFigure {
 # ==== src/services/api.ts ====
 
 import axios from 'axios';
-import { FaceSwapResult, ApiError } from '../types';
+import type { FaceSwapResult, ApiError } from '../types/index';
 
-// Use environment variables or fallback to dev defaults
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8002/api';
-const API_TOKEN = import.meta.env.VITE_API_TOKEN || '90cc43ca30091f85a96b4ce3647ffa7b0f46e8f3';
+// Read from environment variables (from Netlify environment variables)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8002';
+const API_TOKEN = import.meta.env.VITE_API_TOKEN;
+
+// Debug environment variables
+console.log('🔧 Environment check:');
+console.log('  - API_BASE_URL:', API_BASE_URL);
+console.log('  - NODE_ENV:', import.meta.env.MODE);
+console.log('  - API_TOKEN present:', !!API_TOKEN);
+
+// Debug: Check if token is loaded
+if (!API_TOKEN) {
+  console.error('❌ API Token not found! Make sure environment variables are set with VITE_API_TOKEN');
+} else {
+  console.log('✅ API Token loaded:', API_TOKEN.substring(0, 8) + '...');
+}
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
-    'Authorization': `Token ${API_TOKEN}`,
+    'Authorization': API_TOKEN ? `Token ${API_TOKEN}` : '',
   },
   timeout: 300000, // 5 minutes for face swap processing
 });
 
 // Add request interceptor for debugging
 api.interceptors.request.use((config) => {
-  console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+  console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
   return config;
 });
 
 // Add response interceptor for error handling
 api.interceptors.response.use(
   (response) => {
-    console.log(`✅ API Response: ${response.status} ${response.config.url}`);
+    console.log(`✅ API Response: ${response.status} ${response.config.baseURL}${response.config.url}`);
     return response;
   },
   (error) => {
-    console.error(`❌ API Error: ${error.response?.status} ${error.config?.url}`, error.response?.data);
+    console.error(`❌ API Error: ${error.response?.status} ${error.config?.baseURL}${error.config?.url}`, error.response?.data);
     return Promise.reject(error);
   }
 );
@@ -86,13 +101,18 @@ export class FaceSwapAPI {
     selfieFile: File,
     onProgress?: (progress: number) => void
   ): Promise<FaceSwapResult> {
+    if (!API_TOKEN) {
+      throw new Error('API token not configured. Please set VITE_API_TOKEN in environment variables.');
+    }
+
     const formData = new FormData();
     formData.append('selfie', selfieFile);
 
     try {
       console.log(`📤 Uploading file: ${selfieFile.name} (${(selfieFile.size / 1024 / 1024).toFixed(1)}MB)`);
       
-      const response = await api.post<FaceSwapResult>('/imagegen/generate/', formData, {
+      // 🔥 FIXED: Use correct endpoint path without double /api/
+      const response = await api.post<FaceSwapResult>('/api/imagegen/generate/', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -110,12 +130,28 @@ export class FaceSwapAPI {
       console.error('❌ Face swap failed:', error);
       
       if (axios.isAxiosError(error)) {
+        console.error('❌ Axios error details:', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: error.config?.url,
+          method: error.config?.method
+        });
+
         if (error.code === 'ECONNREFUSED') {
-          throw new Error('Cannot connect to server. Make sure the backend is running on port 8002.');
+          throw new Error('Cannot connect to server. Make sure the backend is running.');
+        }
+        
+        if (error.code === 'ERR_NETWORK') {
+          throw new Error('Network error - check CORS settings and backend connectivity.');
         }
         
         if (error.response?.status === 401) {
-          throw new Error('Authentication failed. Please check your API token.');
+          throw new Error('Authentication failed. Check your API token in environment variables.');
+        }
+        
+        if (error.response?.status === 404) {
+          throw new Error('API endpoint not found. Check the backend URL configuration.');
         }
         
         if (error.response?.status === 413) {
@@ -134,7 +170,8 @@ export class FaceSwapAPI {
 
   static async getImageStatus(id: number): Promise<FaceSwapResult> {
     try {
-      const response = await api.get<FaceSwapResult>(`/imagegen/status/${id}/`);
+      // 🔥 FIXED: Use correct endpoint path without double /api/
+      const response = await api.get<FaceSwapResult>(`/api/imagegen/status/${id}/`);
       return response.data;
     } catch (error) {
       console.error('❌ Status check failed:', error);
@@ -144,11 +181,21 @@ export class FaceSwapAPI {
 
   static async testConnection(): Promise<boolean> {
     try {
-      await api.get('/');
+      // Test the health endpoint first
+      const response = await api.get('/health/');
+      console.log('✅ Health check passed:', response.data);
       return true;
     } catch (error) {
       console.error('❌ Connection test failed:', error);
-      return false;
+      // Try the root endpoint as fallback
+      try {
+        const response = await api.get('/');
+        console.log('✅ Root endpoint accessible:', response.data);
+        return true;
+      } catch (rootError) {
+        console.error('❌ Root endpoint also failed:', rootError);
+        return false;
+      }
     }
   }
 }
@@ -191,16 +238,70 @@ export default api;
 # ==== ./tailwind.config.js ====
 
 /** @type {import('tailwindcss').Config} */
-module.exports = {
+export default {
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        primary: {
+          50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
+        }
+      },
+      animation: {
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      }
+    },
   },
   plugins: [],
 }
+
+
+
+# ==== ./netlify.toml ====
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Fix SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Fix MIME types
+[[headers]]
+  for = "*.js"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
+
+[[headers]]
+  for = "*.mjs"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
+
+[[headers]]
+  for = "*.css"
+  [headers.values]
+    Content-Type = "text/css; charset=utf-8"
+
+# Cache assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
 
 
 
@@ -260,18 +361,16 @@ module.exports = {
   "devDependencies": {
     "@eslint/js": "^9.25.0",
     "@flydotio/dockerfile": "^0.7.10",
-    "@tailwindcss/postcss": "^4.1.10",
-    "@tailwindcss/postcss7-compat": "^2.2.17",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
-    "@vitejs/plugin-react": "^4.4.1",
+    "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^16.0.0",
     "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.10",
+    "tailwindcss": "^3.4.17",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.30.1",
     "vite": "^6.3.5"
@@ -364,8 +463,19 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    port: 5173,
+    host: true,
+    open: true
+  },
+  css: {
+    postcss: './postcss.config.js'
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: true
+  }
 })
-
 
 
 
@@ -373,7 +483,7 @@ export default defineConfig({
 
 export default {
   plugins: {
-    '@tailwindcss/postcss': {},
+    tailwindcss: {},
     autoprefixer: {},
   },
 }
@@ -386,13 +496,13 @@ export default {
 
 # ==== src/App.tsx ====
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Sparkles, AlertCircle, History } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultDisplay from './components/ResultDisplay';
 import { FaceSwapAPI } from './services/api';
-import { FaceSwapResult } from './types';
+import type { FaceSwapResult, ProgressStep } from './types/index';
 
 type AppState = 'upload' | 'processing' | 'result' | 'error';
 
@@ -402,7 +512,7 @@ function App() {
   const [result, setResult] = useState<FaceSwapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState({
-    step: 'uploading' as const,
+    step: 'uploading' as ProgressStep,
     progress: 0,
     message: 'Preparing your transformation...',
     matchedFigure: undefined as string | undefined,
@@ -426,7 +536,7 @@ function App() {
     
     try {
       // Simulate processing steps for better UX
-      const updateProgress = (step: typeof processing.step, progress: number, message: string, matchedFigure?: string) => {
+      const updateProgress = (step: ProgressStep, progress: number, message: string, matchedFigure?: string) => {
         setProcessing({ step, progress, message, matchedFigure });
       };
 
@@ -672,13 +782,24 @@ import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
 import './index.css'
 
-createRoot(document.getElementById('root')!).render(
+console.log('🚀 main.tsx loading...');
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('Root element not found');
+}
+
+console.log('✅ Root element found, mounting React app...');
+
+createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
-  </StrictMode>,
-)
+  </StrictMode>
+);
+
+console.log('✅ React app mounted successfully!');
 
 
 
@@ -688,11 +809,11 @@ createRoot(document.getElementById('root')!).render(
 
 # ==== src/components/ProcessingStatus.tsx ====
 
-import React from 'react';
 import { Loader2, Search, Users, Sparkles, CheckCircle } from 'lucide-react';
+import type { ProgressStep } from '../types/index';
 
 interface ProcessingStatusProps {
-  step: 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+  step: ProgressStep;
   progress: number;
   message: string;
   matchedFigure?: string;
@@ -780,7 +901,7 @@ const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
 
       {/* Steps */}
       <div className="space-y-4">
-        {steps.map((stepItem, index) => {
+        {steps.map((stepItem) => {
           const status = getStepStatus(stepItem.key);
           const Icon = stepItem.icon;
           
@@ -873,7 +994,7 @@ export default ProcessingStatus;
 
 import React from 'react';
 import { Download, RefreshCw, Share2, Star } from 'lucide-react';
-import { FaceSwapResult } from '../types';
+import type { FaceSwapResult } from '../types/index';
 
 interface ResultDisplayProps {
   result: FaceSwapResult;
@@ -1125,8 +1246,8 @@ const FileUpload: React.FC<FileUploadProps> = ({
       className={`
         border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200
         ${isDragActive 
-          ? 'border-primary-500 bg-primary-50' 
-          : 'border-gray-300 hover:border-primary-400 hover:bg-gray-50'
+          ? 'border-blue-500 bg-blue-50' 
+          : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
         }
         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
       `}
@@ -1136,7 +1257,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
       <div className="space-y-4">
         <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
           {isDragActive ? (
-            <Upload className="w-8 h-8 text-primary-500" />
+            <Upload className="w-8 h-8 text-blue-500" />
           ) : (
             <ImageIcon className="w-8 h-8 text-gray-400" />
           )}
@@ -1164,7 +1285,7 @@ export default FileUpload;
 
 # ==== src/components/ErrorBoundary.tsx ====
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -1213,7 +1334,7 @@ class ErrorBoundary extends Component<Props, State> {
             <div className="space-y-4">
               <button
                 onClick={this.handleReset}
-                className="btn-primary w-full flex items-center justify-center gap-2"
+                className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 <RefreshCw size={20} />
                 Try Again
@@ -1221,13 +1342,13 @@ class ErrorBoundary extends Component<Props, State> {
               
               <button
                 onClick={() => window.location.reload()}
-                className="btn-secondary w-full"
+                className="w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg border border-gray-300 hover:border-gray-400 transition-colors"
               >
                 Reload Page
               </button>
             </div>
             
-            {process.env.NODE_ENV === 'development' && this.state.error && (
+            {import.meta.env.DEV && this.state.error && (
               <details className="mt-6 text-left">
                 <summary className="text-sm text-gray-500 cursor-pointer hover:text-gray-700">
                   Technical Details
@@ -1308,8 +1429,32 @@ export default ErrorBoundary;
 @tailwind components;
 @tailwind utilities;
 
-/* Add these classes to your src/index.css file after the Tailwind imports */
+/* Reset and base styles */
+* {
+  box-sizing: border-box;
+}
 
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Custom component classes */
 @layer components {
   .btn-primary {
     @apply bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
@@ -1322,20 +1467,20 @@ export default ErrorBoundary;
   .btn-danger {
     @apply bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl;
   }
-  
-  /* Custom animations */
-  @keyframes pulse-slow {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
+}
+
+/* Custom animations */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
   }
-  
-  .animate-pulse-slow {
-    animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  50% {
+    opacity: 0.5;
   }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 

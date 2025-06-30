@@ -23,7 +23,7 @@ const api = axios.create({
   headers: {
     'Authorization': API_TOKEN ? `Token ${API_TOKEN}` : '',
   },
-  timeout: 120000, // 5 minutes for face swap processing
+  timeout: 60000, // Default 1 minute timeout for most requests
 });
 
 // Add request interceptor for debugging
@@ -59,10 +59,14 @@ export class FaceSwapAPI {
     try {
       console.log(`📤 Uploading file: ${selfieFile.name} (${(selfieFile.size / 1024 / 1024).toFixed(1)}MB)`);
       
-      // 🔥 FIXED: Use correct endpoint path without double /api/
+      // 🔥 UPDATED: Extended timeout and better error handling for large uploads
       const response = await api.post<FaceSwapResult>('/api/imagegen/generate/', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+        },
+        timeout: 180000, // 3 minutes for face swap processing
+        validateStatus: function (status) {
+          return status < 500; // Don't throw on 4xx errors, only 5xx
         },
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total && onProgress) {
@@ -83,8 +87,14 @@ export class FaceSwapAPI {
           status: error.response?.status,
           statusText: error.response?.statusText,
           url: error.config?.url,
-          method: error.config?.method
+          method: error.config?.method,
+          code: error.code
         });
+
+        // Handle timeout specifically
+        if (error.code === 'ECONNABORTED') {
+          throw new Error('Request timed out. Large images may take up to 3 minutes to process. Please try a smaller image or try again.');
+        }
 
         if (error.code === 'ECONNREFUSED') {
           throw new Error('Cannot connect to server. Make sure the backend is running.');
@@ -105,6 +115,10 @@ export class FaceSwapAPI {
         if (error.response?.status === 413) {
           throw new Error('File too large. Please use an image under 10MB.');
         }
+
+        if (error.response?.status === 503) {
+          throw new Error('Server is busy processing other requests. Please try again in 30 seconds.');
+        }
         
         if (error.response?.data) {
           const apiError = error.response.data as ApiError;
@@ -118,7 +132,6 @@ export class FaceSwapAPI {
 
   static async getImageStatus(id: number): Promise<FaceSwapResult> {
     try {
-      // 🔥 FIXED: Use correct endpoint path without double /api/
       const response = await api.get<FaceSwapResult>(`/api/imagegen/status/${id}/`);
       return response.data;
     } catch (error) {

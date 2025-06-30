@@ -14,6 +14,11 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 import io
 import time
 import random
+from django.core.cache import cache
+from .utils import compress_image
+
+# Add after imports
+MAX_CONCURRENT_JOBS = 2  # Limit to 2 simultaneous face swaps
 
 # Map historical figures to their Cloudinary URLs - UPDATED WITH 65+ FIGURES
 # Generated from Cloudinary root level

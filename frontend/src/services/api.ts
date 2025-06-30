@@ -23,7 +23,7 @@ const api = axios.create({
   headers: {
     'Authorization': API_TOKEN ? `Token ${API_TOKEN}` : '',
   },
-  timeout: 300000, // 5 minutes for face swap processing
+  timeout: 120000, // 5 minutes for face swap processing
 });
 
 // Add request interceptor for debugging

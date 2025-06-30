@@ -1,4 +1,4 @@
-# faceswap/huggingface_utils.py - IMPROVED VERSION
+# faceswap/huggingface_utils.py - IMPROVED VERSION WITH MEMORY MANAGEMENT
 
 import requests
 import time
@@ -11,6 +11,8 @@ from gradio_client import Client
 import random
 import threading
 import json
+import gc
+import psutil
 
 # 🔗 HuggingFace Space Configuration - matches environment variables
 HUGGINGFACE_SPACE_NAME = getattr(settings, 'HUGGINGFACE_SPACE_NAME', 
@@ -21,6 +23,15 @@ HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
 
 # Export these for use in views
 __all__ = ['FaceFusionClient', 'process_face_swap', 'HUGGINGFACE_SPACE_NAME', 'HUGGINGFACE_API_TOKEN']
+
+def log_memory_usage(stage):
+    """Log current memory usage for debugging"""
+    try:
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        print(f"📊 Memory at {stage}: {memory_mb:.1f} MB")
+    except Exception as e:
+        print(f"⚠️ Memory logging failed: {e}")
 
 def validate_huggingface_config():
     """Validate HuggingFace configuration for security and correctness"""
@@ -42,7 +53,7 @@ def validate_huggingface_config():
 
 class FaceFusionClient:
     """
-    IMPROVED: Proper Gradio Client for private space with enhanced authentication and validation
+    IMPROVED: Proper Gradio Client for private space with enhanced authentication and memory management
     """
     
     def __init__(self):
@@ -166,109 +177,148 @@ class FaceFusionClient:
     
     def swap_faces(self, source_image_field, target_image_field, max_retries=3):
         """
-        IMPROVED: Use proper Gradio client with enhanced error handling and validation
+        IMPROVED: Use proper Gradio client with enhanced error handling and memory management
         """
-        # Get URLs
-        source_url = self.get_image_url(source_image_field)
-        target_url = self.get_image_url(target_image_field)
+        log_memory_usage("start_swap")
         
-        print(f"🔄 Starting face swap with Gradio client")
-        print(f"  Source: {source_url[:80]}...")
-        print(f"  Target: {target_url[:80]}...")
-        
-        for attempt in range(max_retries):
-            try:
-                print(f"🎭 Face swap attempt {attempt + 1}/{max_retries}")
-                
-                client = self.get_client()
-                
-                # Optional: Setup FaceFusion first
+        try:
+            # Get URLs
+            source_url = self.get_image_url(source_image_field)
+            target_url = self.get_image_url(target_image_field)
+            
+            print(f"🔄 Starting face swap with Gradio client")
+            print(f"  Source: {source_url[:80]}...")
+            print(f"  Target: {target_url[:80]}...")
+            
+            for attempt in range(max_retries):
                 try:
-                    self.setup_facefusion()
-                except Exception as setup_error:
-                    print(f"⚠️ Setup failed: {setup_error}, continuing anyway...")
-                
-                # Call the correct API endpoint with proper parameters
-                result = client.predict(
-                    source_url=source_url,  # 👤 Source Image URL (Face to transfer)
-                    target_url=target_url,  # 🎯 Target Image URL (Body/scene)
-                    api_name="/process_images"
-                )
-                
-                print(f"📋 Gradio result: {type(result)} - {result}")
-                
-                if not result or len(result) < 2:
-                    raise Exception(f"Invalid result format: {result}")
-                
-                result_filepath = result[0]  # Image file path
-                status_message = result[1]   # Status message
-                
-                print(f"📋 Status: {status_message}")
-                print(f"📁 Result file: {result_filepath}")
-                
-                # Handle the result file path
-                if hasattr(result_filepath, 'save'):  # PIL Image
-                    print("✅ Got PIL Image, converting to bytes")
-                    import io
-                    img_buffer = io.BytesIO()
-                    result_filepath.save(img_buffer, format='JPEG', quality=90)
-                    return img_buffer.getvalue()
+                    print(f"🎭 Face swap attempt {attempt + 1}/{max_retries}")
                     
-                elif isinstance(result_filepath, str) and os.path.exists(result_filepath):  # File path
-                    print(f"✅ Got file path: {result_filepath}")
-                    with open(result_filepath, 'rb') as f:
-                        return f.read()
+                    client = self.get_client()
+                    
+                    # Optional: Setup FaceFusion first
+                    try:
+                        self.setup_facefusion()
+                    except Exception as setup_error:
+                        print(f"⚠️ Setup failed: {setup_error}, continuing anyway...")
+                    
+                    log_memory_usage("before_api_call")
+                    
+                    # Call the correct API endpoint with proper parameters
+                    result = client.predict(
+                        source_url=source_url,  # 👤 Source Image URL (Face to transfer)
+                        target_url=target_url,  # 🎯 Target Image URL (Body/scene)
+                        api_name="/process_images"
+                    )
+                    
+                    log_memory_usage("after_api_call")
+                    
+                    print(f"📋 Gradio result: {type(result)} - {result}")
+                    
+                    if not result or len(result) < 2:
+                        raise Exception(f"Invalid result format: {result}")
+                    
+                    result_filepath = result[0]  # Image file path
+                    status_message = result[1]   # Status message
+                    
+                    print(f"📋 Status: {status_message}")
+                    print(f"📁 Result file: {result_filepath}")
+                    
+                    # Handle the result file path
+                    result_data = None
+                    
+                    if hasattr(result_filepath, 'save'):  # PIL Image
+                        print("✅ Got PIL Image, converting to bytes")
+                        import io
+                        img_buffer = io.BytesIO()
+                        result_filepath.save(img_buffer, format='JPEG', quality=90)
+                        result_data = img_buffer.getvalue()
                         
-                elif isinstance(result_filepath, dict):  # Gradio file object
-                    if 'path' in result_filepath and os.path.exists(result_filepath['path']):
-                        print(f"✅ Got Gradio file object: {result_filepath['path']}")
-                        with open(result_filepath['path'], 'rb') as f:
-                            return f.read()
-                    elif 'url' in result_filepath:
-                        print(f"✅ Got URL from Gradio: {result_filepath['url']}")
-                        # Download from URL
-                        response = requests.get(result_filepath['url'], timeout=60)
-                        response.raise_for_status()
-                        return response.content
+                    elif isinstance(result_filepath, str) and os.path.exists(result_filepath):  # File path
+                        print(f"✅ Got file path: {result_filepath}")
+                        with open(result_filepath, 'rb') as f:
+                            result_data = f.read()
                         
-                else:
-                    raise Exception(f"Unexpected result format: {type(result_filepath)} - {result_filepath}")
+                        # 🔥 NEW: Delete temp file immediately
+                        try:
+                            os.unlink(result_filepath)
+                            print(f"🧹 Deleted temp file: {result_filepath}")
+                        except Exception as cleanup_error:
+                            print(f"⚠️ Failed to delete temp file: {cleanup_error}")
+                            
+                    elif isinstance(result_filepath, dict):  # Gradio file object
+                        if 'path' in result_filepath and os.path.exists(result_filepath['path']):
+                            print(f"✅ Got Gradio file object: {result_filepath['path']}")
+                            with open(result_filepath['path'], 'rb') as f:
+                                result_data = f.read()
+                            
+                            # 🔥 NEW: Delete temp file immediately
+                            try:
+                                os.unlink(result_filepath['path'])
+                                print(f"🧹 Deleted temp file: {result_filepath['path']}")
+                            except Exception as cleanup_error:
+                                print(f"⚠️ Failed to delete temp file: {cleanup_error}")
+                                
+                        elif 'url' in result_filepath:
+                            print(f"✅ Got URL from Gradio: {result_filepath['url']}")
+                            # Download from URL
+                            response = requests.get(result_filepath['url'], timeout=60)
+                            response.raise_for_status()
+                            result_data = response.content
+                            
+                    else:
+                        raise Exception(f"Unexpected result format: {type(result_filepath)} - {result_filepath}")
                     
-            except Exception as e:
-                error_msg = str(e).lower()
-                print(f"❌ Face swap attempt {attempt + 1} failed: {e}")
-                
-                # Handle specific error types
-                if 'authentication' in error_msg or 'unauthorized' in error_msg:
-                    raise Exception("Authentication failed. Please check your HuggingFace API token.")
-                elif 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
-                    print("🚨 Rate limited - resetting client")
-                    self.client = None  # Reset client
+                    if result_data:
+                        # 🔥 NEW: Force cleanup and garbage collection
+                        gc.collect()
+                        log_memory_usage("after_processing")
+                        return result_data
+                    else:
+                        raise Exception("No result data extracted")
+                        
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    print(f"❌ Face swap attempt {attempt + 1} failed: {e}")
                     
-                    if attempt < max_retries - 1:
-                        delay = (2 ** attempt) * 3 + random.uniform(0, 3)
-                        print(f"⏳ Waiting {delay:.1f}s...")
+                    # Handle specific error types
+                    if 'authentication' in error_msg or 'unauthorized' in error_msg:
+                        raise Exception("Authentication failed. Please check your HuggingFace API token.")
+                    elif 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
+                        print("🚨 Rate limited - resetting client")
+                        self.client = None  # Reset client
+                        
+                        if attempt < max_retries - 1:
+                            delay = (2 ** attempt) * 3 + random.uniform(0, 3)
+                            print(f"⏳ Waiting {delay:.1f}s...")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            raise Exception("Rate limited after all retries")
+                    
+                    elif attempt < max_retries - 1:
+                        delay = 5 + random.uniform(0, 2)
+                        print(f"⏳ Retrying in {delay:.1f}s...")
                         time.sleep(delay)
                         continue
                     else:
-                        raise Exception("Rate limited after all retries")
-                
-                elif attempt < max_retries - 1:
-                    delay = 5 + random.uniform(0, 2)
-                    print(f"⏳ Retrying in {delay:.1f}s...")
-                    time.sleep(delay)
-                    continue
-                else:
-                    break
-        
-        raise Exception(f"All face swap attempts failed")
+                        break
+            
+            raise Exception(f"All face swap attempts failed")
+            
+        finally:
+            # 🔥 NEW: Always cleanup at the end
+            gc.collect()
+            log_memory_usage("cleanup_complete")
 
 def process_face_swap(job_id):
     """
-    Process a face swap job using the improved Gradio client
+    Process a face swap job using the improved Gradio client with memory management
     """
     from .models import FaceSwapJob
     from django.utils import timezone
+    
+    log_memory_usage("job_start")
     
     try:
         job = FaceSwapJob.objects.get(id=job_id)
@@ -298,6 +348,7 @@ def process_face_swap(job_id):
         job.completed_at = timezone.now()
         job.save()
         
+        log_memory_usage("job_complete")
         print(f"✅ Face swap job {job_id} completed successfully")
         return True
         
@@ -313,3 +364,7 @@ def process_face_swap(job_id):
         except:
             pass
         return False
+    finally:
+        # 🔥 NEW: Force cleanup
+        gc.collect()
+        log_memory_usage("job_cleanup")

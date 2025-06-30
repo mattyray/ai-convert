@@ -1,11 +1,11 @@
-# imagegen/views.py - Updated with 65+ historical figures
+# imagegen/views.py - Updated with memory optimization
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 from .models import GeneratedImage
 from .face_match import match_face
-from faceswap.huggingface_utils import FaceFusionClient  # Use the fixed client!
+from faceswap.huggingface_utils import FaceFusionClient
 import tempfile
 import base64
 from django.core.files.base import ContentFile
@@ -17,13 +17,10 @@ import random
 from django.core.cache import cache
 from .utils import compress_image
 
-# Add after imports
-MAX_CONCURRENT_JOBS = 2  # Limit to 2 simultaneous face swaps
+# 🔥 NEW: Memory management settings
+MAX_CONCURRENT_JOBS = 2  # Limit simultaneous face swaps
 
 # Map historical figures to their Cloudinary URLs - UPDATED WITH 65+ FIGURES
-# Generated from Cloudinary root level
-# Copy this dict to your Django views.py
-
 HISTORICAL_FIGURES = {
     "Abraham Lincoln": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608917/Abraham_Lincoln_o5kbjh.png",
     "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749854959/alexander_the_great_j5icxu.png",
@@ -44,7 +41,7 @@ HISTORICAL_FIGURES = {
     "Danny Devito": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Danny_Devito_ajkoal.png",
     "Donald Trump": "https://res.cloudinary.com/dddye9wli/image/upload/v1750550608/Donald_Trump_yqggmn.png",
     "Elon Musk": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Elon_Musk_c3ii8i.png",
-    "Elvis": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png", #god dammit
+    "Elvis": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png",
     "Elvisnotsinging": "https://res.cloudinary.com/dddye9wli/image/upload/v1749857225/elvisnotsinging_twnnta.png",
     "Frida Khalo": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921232/frida_khalo_gzibma.png",
     "Genghis Khan": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608927/Genghis_Khan_ewsfvk.png",
@@ -92,35 +89,49 @@ HISTORICAL_FIGURES = {
 }
 
 
-
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
+        # 🔥 NEW: Check server capacity FIRST
+        active_jobs = cache.get('active_face_swap_jobs', 0)
+        if active_jobs >= MAX_CONCURRENT_JOBS:
+            return Response({
+                "error": "Server is busy processing other requests. Please try again in 30 seconds.",
+                "retry_after": 30
+            }, status=503)
+
         selfie = request.FILES.get("selfie")
         if not selfie:
-            return Response({"error": "Selfie is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Selfie is required"}, status=400)
 
-        # Read the file content once and store it
-        selfie_content = selfie.read()
-        
-        # Save uploaded selfie to temporary file for face matching
+        # 🔥 NEW: Compress the image immediately
+        print(f"📷 Original image size: {selfie.size} bytes")
+        compressed_selfie = compress_image(selfie)
+        selfie_content = compressed_selfie.read()
+        print(f"📦 Compressed image size: {len(selfie_content)} bytes")
+
+        # Create new file object with compressed data
+        selfie_for_model = InMemoryUploadedFile(
+            file=io.BytesIO(selfie_content),
+            field_name='selfie',
+            name=f"compressed_{selfie.name}",
+            content_type='image/jpeg',
+            size=len(selfie_content),
+            charset=None,
+        )
+
+        # Save to temp file for face matching
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
             tmp.write(selfie_content)
             tmp_path = tmp.name
 
-        # Create a new file object for Django model (reset file pointer)
-        selfie_for_model = InMemoryUploadedFile(
-            file=io.BytesIO(selfie_content),
-            field_name=selfie.field_name,
-            name=selfie.name,
-            content_type=selfie.content_type,
-            size=len(selfie_content),
-            charset=selfie.charset,
-        )
-
         temp_image = None
         try:
+            # 🔥 NEW: Increment job counter
+            cache.set('active_face_swap_jobs', active_jobs + 1, timeout=300)
+            print(f"🔢 Active jobs: {active_jobs + 1}/{MAX_CONCURRENT_JOBS}")
+            
             # Step 1: Match face with historical figures
             print("🔍 Starting face matching...")
             match_result = match_face(tmp_path)
@@ -199,9 +210,15 @@ class GenerateImageView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         finally:
+            # 🔥 NEW: Always decrement counter and cleanup
+            current_jobs = cache.get('active_face_swap_jobs', 1)
+            cache.set('active_face_swap_jobs', max(0, current_jobs - 1), timeout=300)
+            print(f"🔢 Jobs after cleanup: {max(0, current_jobs - 1)}")
+            
             # Clean up temporary file
             try:
                 os.unlink(tmp_path)
+                print(f"🧹 Cleaned up temp file: {tmp_path}")
             except:
                 pass
 

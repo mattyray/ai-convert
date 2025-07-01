@@ -28,12 +28,16 @@ class UsageLimitMiddleware:
         if endpoint_name not in self.tracked_endpoints:
             return self.get_response(request)
             
-        # Ensure session exists
+        # FORCE session creation for anonymous users
         if not request.session.session_key:
             request.session.create()
+            request.session.save()
+            
+        print(f"🔑 Session key: {request.session.session_key}")  # Debug
             
         # Get usage session
         usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        print(f"📊 Usage before: matches={usage_session.matches_used}, randomizes={usage_session.randomizes_used}")  # Debug
         
         # Check limits
         feature_type = self.tracked_endpoints[endpoint_name]
@@ -49,6 +53,7 @@ class UsageLimitMiddleware:
     
     def create_limit_response(self, feature_type, usage_session):
         """Create response when user hits limit"""
+        print(f"🚫 Limit hit for {feature_type}")  # Debug
         return JsonResponse({
             'error': 'Usage limit reached',
             'message': f'You have reached your limit for {feature_type}. Please sign up to continue.',

@@ -1,6 +1,6 @@
 # CLEAN BACKEND CODE SNAPSHOT
 # Essential files for HuggingFace debugging
-# Total files: 44
+# Total files: 45
 # Excludes: migrations, tests, media, large JSON files
 
 # ===== CONFIGURATION FILES =====
@@ -1588,8 +1588,6 @@ class GeneratedImage(models.Model):
     )
     output_url = models.URLField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
-    
-    # 🔥 FIXED: Expiration fields with proper function
     expires_at = models.DateTimeField(default=get_expiration_time)
     is_expired = models.BooleanField(default=False)
     cleanup_attempted = models.BooleanField(default=False)
@@ -1600,21 +1598,18 @@ class GeneratedImage(models.Model):
     def delete_from_cloudinary(self):
         """Delete associated images from Cloudinary"""
         deleted_files = []
-        
         try:
             if self.selfie and hasattr(self.selfie, 'public_id'):
                 cloudinary.uploader.destroy(self.selfie.public_id)
                 deleted_files.append(f"selfie:{self.selfie.public_id}")
         except Exception as e:
             print(f"⚠️ Error deleting selfie: {e}")
-            
         try:
             if self.output_image and hasattr(self.output_image, 'public_id'):
                 cloudinary.uploader.destroy(self.output_image.public_id)
                 deleted_files.append(f"output:{self.output_image.public_id}")
         except Exception as e:
             print(f"⚠️ Error deleting output: {e}")
-            
         return deleted_files
     
     def expire_and_cleanup(self):
@@ -1629,6 +1624,54 @@ class GeneratedImage(models.Model):
     def is_expired_now(self):
         """Check if image should be expired"""
         return timezone.now() > self.expires_at
+
+
+class UsageSession(models.Model):
+    """Track usage limits for anonymous users"""
+    session_key = models.CharField(max_length=40, unique=True, db_index=True)
+    matches_used = models.IntegerField(default=0)
+    randomizes_used = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    MAX_MATCHES = 1
+    MAX_RANDOMIZES = 1
+    
+    def __str__(self):
+        return f"Session {self.session_key} - M:{self.matches_used}/{self.MAX_MATCHES} R:{self.randomizes_used}/{self.MAX_RANDOMIZES}"
+    
+    @property
+    def can_match(self):
+        return self.matches_used < self.MAX_MATCHES
+    
+    @property
+    def can_randomize(self):
+        return self.randomizes_used < self.MAX_RANDOMIZES
+    
+    @property
+    def is_limited(self):
+        return not self.can_match and not self.can_randomize
+    
+    def use_match(self):
+        if self.can_match:
+            self.matches_used += 1
+            self.save()
+            return True
+        return False
+    
+    def use_randomize(self):
+        if self.can_randomize:
+            self.randomizes_used += 1
+            self.save()
+            return True
+        return False
+    
+    @classmethod
+    def get_or_create_for_session(cls, session_key):
+        usage_session, created = cls.objects.get_or_create(
+            session_key=session_key,
+            defaults={'matches_used': 0, 'randomizes_used': 0}
+        )
+        return usage_session
 ```
 
 ## imagegen/serializers.py
@@ -1811,14 +1854,100 @@ def compress_image(image_file, max_size=(800, 800), quality=75):
 ## imagegen/urls.py
 ```python
 from django.urls import path
-from .views import GenerateImageView, ImageStatusView, UnlockImageView, ListGeneratedImagesView
+from .views import (
+    GenerateImageView, 
+    ImageStatusView, 
+    UnlockImageView, 
+    ListGeneratedImagesView,
+    RandomizeImageView,
+    UsageStatusView,
+)
+
+app_name = "imagegen"
 
 urlpatterns = [
     path("generate/", GenerateImageView.as_view(), name="generate-image"),
+    path("randomize/", RandomizeImageView.as_view(), name="randomize-image"),
+    path("usage/", UsageStatusView.as_view(), name="usage-status"),
     path("status/<int:prediction_id>/", ImageStatusView.as_view(), name="image-status"),
     path("unlock/", UnlockImageView.as_view(), name="unlock-generation"),
-    path("list/", ListGeneratedImagesView.as_view(), name="list-images"),  # New endpoint
+    path("list/", ListGeneratedImagesView.as_view(), name="list-images"),
 ]
+```
+
+## imagegen/middleware.py
+```python
+from django.http import JsonResponse
+from django.urls import resolve
+from .models import UsageSession
+
+
+class UsageLimitMiddleware:
+    """Track and enforce usage limits for anonymous users"""
+    
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.tracked_endpoints = {
+            'generate-image': 'match',
+            'randomize-image': 'randomize',
+        }
+    
+    def __call__(self, request):
+        # Skip for authenticated users
+        if request.user.is_authenticated or request.method != 'POST':
+            return self.get_response(request)
+            
+        # Check if this is a tracked endpoint
+        try:
+            resolved = resolve(request.path_info)
+            endpoint_name = resolved.url_name
+        except:
+            return self.get_response(request)
+            
+        if endpoint_name not in self.tracked_endpoints:
+            return self.get_response(request)
+            
+        # FORCE session creation for anonymous users
+        if not request.session.session_key:
+            request.session.create()
+            request.session.save()
+            
+        print(f"🔑 Session key: {request.session.session_key}")  # Debug
+            
+        # Get usage session
+        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        print(f"📊 Usage before: matches={usage_session.matches_used}, randomizes={usage_session.randomizes_used}")  # Debug
+        
+        # Check limits
+        feature_type = self.tracked_endpoints[endpoint_name]
+        
+        if feature_type == 'match' and not usage_session.can_match:
+            return self.create_limit_response('match', usage_session)
+        elif feature_type == 'randomize' and not usage_session.can_randomize:
+            return self.create_limit_response('randomize', usage_session)
+            
+        # Store usage session for view to use
+        request.usage_session = usage_session
+        return self.get_response(request)
+    
+    def create_limit_response(self, feature_type, usage_session):
+        """Create response when user hits limit"""
+        print(f"🚫 Limit hit for {feature_type}")  # Debug
+        return JsonResponse({
+            'error': 'Usage limit reached',
+            'message': f'You have reached your limit for {feature_type}. Please sign up to continue.',
+            'feature_type': feature_type,
+            'usage': {
+                'matches_used': usage_session.matches_used,
+                'matches_limit': usage_session.MAX_MATCHES,
+                'randomizes_used': usage_session.randomizes_used,
+                'randomizes_limit': usage_session.MAX_RANDOMIZES,
+                'can_match': usage_session.can_match,
+                'can_randomize': usage_session.can_randomize,
+                'is_limited': usage_session.is_limited,
+            },
+            'registration_required': True
+        }, status=429)
 ```
 
 ## imagegen/views.py
@@ -1828,7 +1957,7 @@ urlpatterns = [
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
-from .models import GeneratedImage
+from .models import GeneratedImage, UsageSession
 from .face_match import match_face
 from faceswap.huggingface_utils import FaceFusionClient
 import tempfile
@@ -1841,6 +1970,7 @@ import time
 import random
 from django.core.cache import cache
 from .utils import compress_image
+
 
 # 🔥 NEW: Memory management settings
 MAX_CONCURRENT_JOBS = 2  # Limit simultaneous face swaps
@@ -1918,25 +2048,21 @@ class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        # 🔥 NEW: Check server capacity FIRST
+        # Check server capacity
         active_jobs = cache.get('active_face_swap_jobs', 0)
         if active_jobs >= MAX_CONCURRENT_JOBS:
-            return Response({
-                "error": "Server is busy processing other requests. Please try again in 30 seconds.",
-                "retry_after": 30
-            }, status=503)
+            return Response({"error": "Server busy. Try again in 30 seconds.", "retry_after": 30}, status=503)
 
         selfie = request.FILES.get("selfie")
         if not selfie:
             return Response({"error": "Selfie is required"}, status=400)
 
-        # 🔥 NEW: Compress the image immediately
-        print(f"📷 Original image size: {selfie.size} bytes")
+        # Get usage session from middleware
+        usage_session = getattr(request, 'usage_session', None)
+        
+        # Compress image
         compressed_selfie = compress_image(selfie)
         selfie_content = compressed_selfie.read()
-        print(f"📦 Compressed image size: {len(selfie_content)} bytes")
-
-        # Create new file object with compressed data
         selfie_for_model = InMemoryUploadedFile(
             file=io.BytesIO(selfie_content),
             field_name='selfie',
@@ -1953,12 +2079,10 @@ class GenerateImageView(APIView):
 
         temp_image = None
         try:
-            # 🔥 NEW: Increment job counter
+            # Increment job counter
             cache.set('active_face_swap_jobs', active_jobs + 1, timeout=300)
-            print(f"🔢 Active jobs: {active_jobs + 1}/{MAX_CONCURRENT_JOBS}")
             
-            # Step 1: Match face with historical figures
-            print("🔍 Starting face matching...")
+            # Face matching
             match_result = match_face(tmp_path)
             if "error" in match_result:
                 return Response(match_result, status=status.HTTP_400_BAD_REQUEST)
@@ -1966,16 +2090,12 @@ class GenerateImageView(APIView):
             match_name = match_result["match_name"]
             match_score = match_result.get("score", 0)
             
-            print(f"🎯 Face match found: {match_name} (score: {match_score:.3f})")
-
-            # Check if we have a historical image for this match
+            # Get historical image
             historical_image_url = HISTORICAL_FIGURES.get(match_name)
             if not historical_image_url:
-                return Response({
-                    "error": f"No historical image available for {match_name}. Available figures: {list(HISTORICAL_FIGURES.keys())}"
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": f"No historical image available for {match_name}"}, status=400)
 
-            # Step 2: Create database record with the fresh file object
+            # Create database record
             temp_image = GeneratedImage.objects.create(
                 user=request.user if request.user.is_authenticated else None,
                 prompt=f"You as {match_name}",
@@ -1984,32 +2104,27 @@ class GenerateImageView(APIView):
                 output_url="",
             )
 
-            print(f"📝 Created GeneratedImage record: {temp_image.id}")
-
-            # Step 3: Create mock image field objects for face swap
+            # Face swap
             class MockImageField:
                 def __init__(self, url):
                     self.url = url
 
-            source_mock = MockImageField(temp_image.selfie.url)  # User's selfie
-            target_mock = MockImageField(historical_image_url)   # Historical figure
+            source_mock = MockImageField(temp_image.selfie.url)
+            target_mock = MockImageField(historical_image_url)
 
-            print(f"🔄 Starting face swap: {temp_image.selfie.url} -> {historical_image_url}")
-
-            # Step 4: Use the FIXED Gradio client approach
             client = FaceFusionClient()
             result_image_data = client.swap_faces(source_mock, target_mock)
 
-            print(f"✅ Face swap completed: {len(result_image_data)} bytes")
-
-            # Step 5: Save the result
+            # Save result
             temp_image.output_image.save(
                 f"{temp_image.id}_fused_{match_name.replace(' ', '_')}.jpg", 
                 ContentFile(result_image_data)
             )
             temp_image.save()
 
-            print(f"💾 Saved result to: {temp_image.output_image.url}")
+            # Update usage for anonymous users
+            if usage_session and not request.user.is_authenticated:
+                usage_session.use_match()
 
             return Response({
                 "id": temp_image.id,
@@ -2018,42 +2133,181 @@ class GenerateImageView(APIView):
                 "message": f"Successfully transformed you into {match_name}!",
                 "output_image_url": temp_image.output_image.url,
                 "original_selfie_url": temp_image.selfie.url,
-                "historical_figure_url": historical_image_url
+                "historical_figure_url": historical_image_url,
+                "usage": self.get_usage_data(request, usage_session)
             })
 
         except Exception as e:
-            print(f"❌ Error in GenerateImageView: {str(e)}")
-            # Clean up on error
             if temp_image:
                 try:
                     temp_image.delete()
                 except:
                     pass
-            
-            return Response({
-                "error": f"Face processing failed: {str(e)}"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": f"Face processing failed: {str(e)}"}, status=500)
         
         finally:
-            # 🔥 NEW: Always decrement counter and cleanup
             current_jobs = cache.get('active_face_swap_jobs', 1)
             cache.set('active_face_swap_jobs', max(0, current_jobs - 1), timeout=300)
-            print(f"🔢 Jobs after cleanup: {max(0, current_jobs - 1)}")
-            
-            # Clean up temporary file
             try:
                 os.unlink(tmp_path)
-                print(f"🧹 Cleaned up temp file: {tmp_path}")
             except:
                 pass
 
+    def get_usage_data(self, request, usage_session):
+        if request.user.is_authenticated:
+            return {"unlimited": True}
+        elif usage_session:
+            return {
+                "matches_used": usage_session.matches_used,
+                "matches_limit": usage_session.MAX_MATCHES,
+                "randomizes_used": usage_session.randomizes_used,
+                "randomizes_limit": usage_session.MAX_RANDOMIZES,
+                "can_match": usage_session.can_match,
+                "can_randomize": usage_session.can_randomize,
+                "is_limited": usage_session.is_limited,
+            }
+        return None
 
+
+class RandomizeImageView(APIView):
+    """Randomize with random historical figure"""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        # Check server capacity
+        active_jobs = cache.get('active_face_swap_jobs', 0)
+        if active_jobs >= MAX_CONCURRENT_JOBS:
+            return Response({"error": "Server busy. Try again in 30 seconds.", "retry_after": 30}, status=503)
+
+        selfie = request.FILES.get("selfie")
+        if not selfie:
+            return Response({"error": "Selfie is required"}, status=400)
+
+        # Get usage session from middleware
+        usage_session = getattr(request, 'usage_session', None)
+        
+        # Pick random figure
+        random_figure = random.choice(list(HISTORICAL_FIGURES.keys()))
+        historical_image_url = HISTORICAL_FIGURES[random_figure]
+        
+        # Compress image
+        compressed_selfie = compress_image(selfie)
+        selfie_content = compressed_selfie.read()
+        selfie_for_model = InMemoryUploadedFile(
+            file=io.BytesIO(selfie_content),
+            field_name='selfie',
+            name=f"compressed_{selfie.name}",
+            content_type='image/jpeg',
+            size=len(selfie_content),
+            charset=None,
+        )
+
+        temp_image = None
+        try:
+            # Increment job counter
+            cache.set('active_face_swap_jobs', active_jobs + 1, timeout=300)
+
+            # Create database record
+            temp_image = GeneratedImage.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                prompt=f"You as {random_figure} (randomized)",
+                match_name=random_figure,
+                selfie=selfie_for_model,
+                output_url="",
+            )
+
+            # Face swap
+            class MockImageField:
+                def __init__(self, url):
+                    self.url = url
+
+            source_mock = MockImageField(temp_image.selfie.url)
+            target_mock = MockImageField(historical_image_url)
+
+            client = FaceFusionClient()
+            result_image_data = client.swap_faces(source_mock, target_mock)
+
+            # Save result
+            temp_image.output_image.save(
+                f"{temp_image.id}_randomized_{random_figure.replace(' ', '_')}.jpg", 
+                ContentFile(result_image_data)
+            )
+            temp_image.save()
+
+            # Update usage for anonymous users
+            if usage_session and not request.user.is_authenticated:
+                usage_session.use_randomize()
+
+            return Response({
+                "id": temp_image.id,
+                "match_name": random_figure,
+                "match_score": 1.0,
+                "message": f"You've been randomly transformed into {random_figure}!",
+                "output_image_url": temp_image.output_image.url,
+                "original_selfie_url": temp_image.selfie.url,
+                "historical_figure_url": historical_image_url,
+                "is_randomized": True,
+                "usage": self.get_usage_data(request, usage_session)
+            })
+
+        except Exception as e:
+            if temp_image:
+                try:
+                    temp_image.delete()
+                except:
+                    pass
+            return Response({"error": f"Randomized face processing failed: {str(e)}"}, status=500)
+        
+        finally:
+            current_jobs = cache.get('active_face_swap_jobs', 1)
+            cache.set('active_face_swap_jobs', max(0, current_jobs - 1), timeout=300)
+
+    def get_usage_data(self, request, usage_session):
+        if request.user.is_authenticated:
+            return {"unlimited": True}
+        elif usage_session:
+            return {
+                "matches_used": usage_session.matches_used,
+                "matches_limit": usage_session.MAX_MATCHES,
+                "randomizes_used": usage_session.randomizes_used,
+                "randomizes_limit": usage_session.MAX_RANDOMIZES,
+                "can_match": usage_session.can_match,
+                "can_randomize": usage_session.can_randomize,
+                "is_limited": usage_session.is_limited,
+            }
+        return None
+
+
+class UsageStatusView(APIView):
+    """Get current usage status"""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        if request.user.is_authenticated:
+            return Response({"unlimited": True, "user_authenticated": True})
+        
+        if not request.session.session_key:
+            request.session.create()
+            
+        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        
+        return Response({
+            "matches_used": usage_session.matches_used,
+            "matches_limit": usage_session.MAX_MATCHES,
+            "randomizes_used": usage_session.randomizes_used,
+            "randomizes_limit": usage_session.MAX_RANDOMIZES,
+            "can_match": usage_session.can_match,
+            "can_randomize": usage_session.can_randomize,
+            "is_limited": usage_session.is_limited,
+            "user_authenticated": False
+        })
+
+
+# Keep existing views
 class ImageStatusView(APIView):
-    """Get status of a generated image"""
     def get(self, request, prediction_id):
         try:
             generated_image = GeneratedImage.objects.get(id=prediction_id)
-            
             return Response({
                 "id": generated_image.id,
                 "status": "completed" if generated_image.output_image else "processing",
@@ -2063,26 +2317,20 @@ class ImageStatusView(APIView):
                 "created_at": generated_image.created_at
             })
         except GeneratedImage.DoesNotExist:
-            return Response(
-                {"error": "Generated image not found"}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Generated image not found"}, status=404)
 
 
 class UnlockImageView(APIView):
-    """Reset generation counter for demo purposes"""
     def post(self, request):
         request.session["image_generation_count"] = 0
         return Response({"message": "Unlock granted. You can generate again."})
 
 
 class ListGeneratedImagesView(APIView):
-    """List all generated images for a user"""
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
         images = GeneratedImage.objects.filter(user=request.user).order_by('-created_at')
-        
         results = []
         for img in images:
             results.append({
@@ -2093,7 +2341,6 @@ class ListGeneratedImagesView(APIView):
                 "selfie_url": img.selfie.url,
                 "created_at": img.created_at
             })
-        
         return Response({"images": results})
 ```
 
@@ -2656,8 +2903,8 @@ else:
         'django.contrib.auth.middleware.AuthenticationMiddleware',
         'django.contrib.messages.middleware.MessageMiddleware',
         'django.middleware.clickjacking.XFrameOptionsMiddleware',
+        'imagegen.middleware.UsageLimitMiddleware',  # ADD THIS LINE
     ]
-    
     ROOT_URLCONF = 'django_project.urls'
 
 # Templates

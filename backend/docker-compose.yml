@@ -16,7 +16,21 @@ services:
       timeout: 5s
       retries: 5
 
-  # Django Backend
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Django Backend (uses regular dev settings)
   backend:
     build: 
       context: .
@@ -34,9 +48,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
-      # 🔑 FIXED: Use space name format for Gradio client (not full URL)
       - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
       - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 NOT a Celery worker
+      - IS_CELERY_WORKER=false
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
@@ -44,9 +61,72 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+  # Celery Worker (uses same dev settings but with special env var)
+  celery_worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 CRITICAL: Mark this as a Celery worker
+      - IS_CELERY_WORKER=true
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "django_project", "worker", "--loglevel=info"]
+
+  # Celery Beat (uses same dev settings but with special env var)
+  celery_beat:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 CRITICAL: Mark this as a Celery worker
+      - IS_CELERY_WORKER=true
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "django_project", "beat", "--loglevel=info", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
 
 volumes:
   postgres_data:
   static_volume:
   media_volume:
+  redis_data:

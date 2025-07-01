@@ -72,51 +72,107 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[
     "localhost", "127.0.0.1", "0.0.0.0", "web", "*.fly.dev"
 ])
 
-# Installed apps
-INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',  # ✅ This is required for collectstatic
-    'cloudinary_storage',
-    'cloudinary',
+# 🔥 SIMPLE CELERY FIX - detect if this is a Celery worker
+import sys
 
-    # Custom apps
-    'accounts.apps.AccountsConfig',
-    'chat.apps.ChatConfig',
-    'faceswap.apps.FaceswapConfig',
+# Check if this is a Celery worker process
+IS_CELERY = (
+    os.environ.get('IS_CELERY_WORKER') == 'true' or
+    'celery' in sys.argv[0] or 
+    'worker' in sys.argv or
+    'beat' in sys.argv
+)
 
-    # Third-party
-    'django.contrib.sites',
-    'allauth',
-    'allauth.account',
-    'allauth.socialaccount',
-    'allauth.socialaccount.providers.google',
+if IS_CELERY:
+    print("🔧 Celery worker detected - applying minimal configuration...")
+    
+    # Minimal apps for Celery workers
+    INSTALLED_APPS = [
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'django.contrib.sessions',
+        'django.contrib.messages',
+        'django.contrib.staticfiles',
+        'cloudinary_storage',
+        'cloudinary',
+        
+        # Custom apps (needed for tasks)
+        'accounts.apps.AccountsConfig',
+        'faceswap.apps.FaceswapConfig',
+        'imagegen',
+        
+        # Celery apps
+        'django_celery_beat',
+        'django_celery_results',
+        
+        'rest_framework',
+        'rest_framework.authtoken',
+    ]
+    
+    # Minimal middleware for Celery workers
+    MIDDLEWARE = [
+        'django.middleware.security.SecurityMiddleware',
+        'django.contrib.sessions.middleware.SessionMiddleware',
+        'django.middleware.common.CommonMiddleware',
+        'django.middleware.csrf.CsrfViewMiddleware',
+        'django.contrib.auth.middleware.AuthenticationMiddleware',
+        'django.contrib.messages.middleware.MessageMiddleware',
+    ]
+    
+    # Use minimal URLs for Celery
+    ROOT_URLCONF = 'django_project.celery_urls'
+    
+else:
+    print("🌐 Standard Django configuration loaded")
+    
+    # Full apps for Django web server
+    INSTALLED_APPS = [
+        'django.contrib.admin',
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'django.contrib.sessions',
+        'django.contrib.messages',
+        'django.contrib.staticfiles',
+        'cloudinary_storage',
+        'cloudinary',
 
-    'imagegen',
-    'corsheaders',
+        # Custom apps
+        'accounts.apps.AccountsConfig',
+        'chat.apps.ChatConfig',
+        'faceswap.apps.FaceswapConfig',
 
-    'rest_framework',
-    'rest_framework.authtoken', 
-]
+        # Third-party
+        'django.contrib.sites',
+        'allauth',
+        'allauth.account',
+        'allauth.socialaccount',
+        'allauth.socialaccount.providers.google',
 
-# Middleware
-MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'allauth.account.middleware.AccountMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-]
+        'imagegen',
+        'corsheaders',
 
-ROOT_URLCONF = 'django_project.urls'
+        'rest_framework',
+        'rest_framework.authtoken',
+
+        'django_celery_beat',
+        'django_celery_results', 
+    ]
+
+    # Full middleware for Django web server
+    MIDDLEWARE = [
+        'corsheaders.middleware.CorsMiddleware',
+        'django.middleware.security.SecurityMiddleware',
+        'whitenoise.middleware.WhiteNoiseMiddleware',
+        'django.contrib.sessions.middleware.SessionMiddleware',
+        'allauth.account.middleware.AccountMiddleware',
+        'django.middleware.common.CommonMiddleware',
+        'django.middleware.csrf.CsrfViewMiddleware',
+        'django.contrib.auth.middleware.AuthenticationMiddleware',
+        'django.contrib.messages.middleware.MessageMiddleware',
+        'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    ]
+    
+    ROOT_URLCONF = 'django_project.urls'
 
 # Templates
 TEMPLATES = [
@@ -238,91 +294,114 @@ REST_FRAMEWORK = {
 }
 
 # HuggingFace Configuration - FIXED
-# 🔑 Use space name format (not full URL) for Gradio client
 HUGGINGFACE_SPACE_NAME = env('HUGGINGFACE_SPACE_NAME', default='mnraynor90/facefusionfastapi-private')
 HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
 
 print(f"🔧 HuggingFace Space: {HUGGINGFACE_SPACE_NAME}")
 print(f"🔑 HuggingFace Token: {'***configured***' if HUGGINGFACE_API_TOKEN != 'dummy' else 'NOT SET'}")
 
-# 🔥 ROBUST CORS CONFIGURATION (FIXED) 🔥
+# CORS Configuration (only for non-Celery)
+if not IS_CELERY:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "https://ai-convert.netlify.app",
+    ]
+    CORS_ALLOW_CREDENTIALS = True
+    CORS_PREFLIGHT_MAX_AGE = 86400
 
-# 🧪 TEMPORARY DEBUG: Allow all origins to test if CORS is the issue
-CORS_ALLOW_ALL_ORIGINS = True  # ← TEMPORARY - CHANGE TO FALSE AFTER TESTING
+    CORS_ALLOW_HEADERS = [
+        'accept', 'accept-encoding', 'authorization', 'content-type', 'dnt', 'origin',
+        'user-agent', 'x-csrftoken', 'x-requested-with', 'cache-control', 'pragma',
+        'expires', 'content-length', 'host', 'referer', 'sec-ch-ua', 'sec-ch-ua-mobile',
+        'sec-ch-ua-platform', 'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site',
+    ]
 
-# Specific allowed origins (when CORS_ALLOW_ALL_ORIGINS = False)
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Vite dev server
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",  # React dev server
-    "https://ai-convert.netlify.app",  # Your specific Netlify URL
-]
+    CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'HEAD']
 
-# CORS Configuration
-CORS_ALLOW_CREDENTIALS = True
-CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
-
-# Comprehensive headers list
-CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
-    'cache-control',
-    'pragma',
-    'expires',
-    'content-length',
-    'host',
-    'referer',
-    'sec-ch-ua',
-    'sec-ch-ua-mobile',
-    'sec-ch-ua-platform',
-    'sec-fetch-dest',
-    'sec-fetch-mode',
-    'sec-fetch-site',
-]
-
-# All HTTP methods
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-    'HEAD',
-]
-
-# ✅ REMOVED: CORS_REPLACE_HTTPS_REFERER (deprecated setting)
-
-print(f"🌐 CORS configured for origins: {CORS_ALLOWED_ORIGINS}")
-print(f"🔥 CORS_ALLOW_ALL_ORIGINS: {CORS_ALLOW_ALL_ORIGINS}")
-print(f"🔑 CORS_ALLOW_CREDENTIALS: {CORS_ALLOW_CREDENTIALS}")
-
-# 🧪 Add request logging to see if requests are reaching Django
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
+# Conditional Logging
+if IS_CELERY:
+    # Simplified logging for Celery workers
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+            },
         },
-    },
-    'loggers': {
-        'corsheaders': {
+        'root': {
             'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': True,
+            'level': 'INFO',
         },
-        'django.request': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': True,
+        'loggers': {
+            'celery': {
+                'handlers': ['console'],
+                'level': 'INFO',
+                'propagate': False,
+            },
         },
+    }
+    
+    # Disable problematic system checks for Celery
+    SILENCED_SYSTEM_CHECKS = [
+        'admin.E404',
+        'urls.E007',
+        'urls.W005',
+        'security.W004',
+        'security.W008',
+    ]
+    
+    print("✅ Celery worker configuration applied")
+else:
+    # Full logging for Django
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+            },
+        },
+        'loggers': {
+            'corsheaders': {
+                'handlers': ['console'],
+                'level': 'DEBUG',
+                'propagate': True,
+            },
+            'django.request': {
+                'handlers': ['console'],
+                'level': 'DEBUG',
+                'propagate': True,
+            },
+        },
+    }
+
+# Celery Configuration
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_CACHE_BACKEND = 'django-cache'
+CELERY_RESULT_EXPIRES = 7 * 24 * 60 * 60  # 7 days
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Periodic Tasks Configuration
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-expired-images': {
+        'task': 'imagegen.tasks.cleanup_expired_images_task',
+        'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
+        'options': {'expires': 60 * 60}  # Task expires in 1 hour if not picked up
     },
 }
+
+print(f"✅ Settings loaded - IS_CELERY: {IS_CELERY}")

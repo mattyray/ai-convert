@@ -1,6 +1,6 @@
 # CLEAN BACKEND CODE SNAPSHOT
 # Essential files for HuggingFace debugging
-# Total files: 40
+# Total files: 44
 # Excludes: migrations, tests, media, large JSON files
 
 # ===== CONFIGURATION FILES =====
@@ -68,6 +68,14 @@ gradio-client==1.10.3
 
 dj-database-url==2.1.0
 
+psutil==5.9.0
+
+celery==5.5.3
+django-celery-beat==2.8.1
+django-celery-results==2.6.0
+redis==5.2.0
+
+
 ```
 
 ## requirements-dev.txt
@@ -105,7 +113,21 @@ services:
       timeout: 5s
       retries: 5
 
-  # Django Backend
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Django Backend (uses regular dev settings)
   backend:
     build: 
       context: .
@@ -123,9 +145,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
-      # 🔑 FIXED: Use space name format for Gradio client (not full URL)
       - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
       - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 NOT a Celery worker
+      - IS_CELERY_WORKER=false
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
@@ -133,12 +158,75 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+  # Celery Worker (uses same dev settings but with special env var)
+  celery_worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 CRITICAL: Mark this as a Celery worker
+      - IS_CELERY_WORKER=true
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "django_project", "worker", "--loglevel=info"]
+
+  # Celery Beat (uses same dev settings but with special env var)
+  celery_beat:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 CRITICAL: Mark this as a Celery worker
+      - IS_CELERY_WORKER=true
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "django_project", "beat", "--loglevel=info", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
 
 volumes:
   postgres_data:
   static_volume:
   media_volume:
+  redis_data:
 ```
 
 ## fly.toml
@@ -166,9 +254,9 @@ console_command = "/code/manage.py shell"
     hard_limit = 25
 
 [[vm]]
-  memory = "2gb"
+  memory = "4gb"
   cpu_kind = "shared"
-  cpus = 1
+  cpus = 2          # ← Change this from 1 to 2
 
 [[statics]]
   guest_path = "/code/static"
@@ -565,7 +653,7 @@ class FaceSwapJobAdmin(admin.ModelAdmin):
 
 ## faceswap/huggingface_utils.py
 ```python
-# faceswap/huggingface_utils.py - IMPROVED VERSION
+# faceswap/huggingface_utils.py - IMPROVED VERSION WITH MEMORY MANAGEMENT
 
 import requests
 import time
@@ -578,6 +666,8 @@ from gradio_client import Client
 import random
 import threading
 import json
+import gc
+import psutil
 
 # 🔗 HuggingFace Space Configuration - matches environment variables
 HUGGINGFACE_SPACE_NAME = getattr(settings, 'HUGGINGFACE_SPACE_NAME', 
@@ -588,6 +678,15 @@ HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
 
 # Export these for use in views
 __all__ = ['FaceFusionClient', 'process_face_swap', 'HUGGINGFACE_SPACE_NAME', 'HUGGINGFACE_API_TOKEN']
+
+def log_memory_usage(stage):
+    """Log current memory usage for debugging"""
+    try:
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        print(f"📊 Memory at {stage}: {memory_mb:.1f} MB")
+    except Exception as e:
+        print(f"⚠️ Memory logging failed: {e}")
 
 def validate_huggingface_config():
     """Validate HuggingFace configuration for security and correctness"""
@@ -609,7 +708,7 @@ def validate_huggingface_config():
 
 class FaceFusionClient:
     """
-    IMPROVED: Proper Gradio Client for private space with enhanced authentication and validation
+    IMPROVED: Proper Gradio Client for private space with enhanced authentication and memory management
     """
     
     def __init__(self):
@@ -733,109 +832,148 @@ class FaceFusionClient:
     
     def swap_faces(self, source_image_field, target_image_field, max_retries=3):
         """
-        IMPROVED: Use proper Gradio client with enhanced error handling and validation
+        IMPROVED: Use proper Gradio client with enhanced error handling and memory management
         """
-        # Get URLs
-        source_url = self.get_image_url(source_image_field)
-        target_url = self.get_image_url(target_image_field)
+        log_memory_usage("start_swap")
         
-        print(f"🔄 Starting face swap with Gradio client")
-        print(f"  Source: {source_url[:80]}...")
-        print(f"  Target: {target_url[:80]}...")
-        
-        for attempt in range(max_retries):
-            try:
-                print(f"🎭 Face swap attempt {attempt + 1}/{max_retries}")
-                
-                client = self.get_client()
-                
-                # Optional: Setup FaceFusion first
+        try:
+            # Get URLs
+            source_url = self.get_image_url(source_image_field)
+            target_url = self.get_image_url(target_image_field)
+            
+            print(f"🔄 Starting face swap with Gradio client")
+            print(f"  Source: {source_url[:80]}...")
+            print(f"  Target: {target_url[:80]}...")
+            
+            for attempt in range(max_retries):
                 try:
-                    self.setup_facefusion()
-                except Exception as setup_error:
-                    print(f"⚠️ Setup failed: {setup_error}, continuing anyway...")
-                
-                # Call the correct API endpoint with proper parameters
-                result = client.predict(
-                    source_url=source_url,  # 👤 Source Image URL (Face to transfer)
-                    target_url=target_url,  # 🎯 Target Image URL (Body/scene)
-                    api_name="/process_images"
-                )
-                
-                print(f"📋 Gradio result: {type(result)} - {result}")
-                
-                if not result or len(result) < 2:
-                    raise Exception(f"Invalid result format: {result}")
-                
-                result_filepath = result[0]  # Image file path
-                status_message = result[1]   # Status message
-                
-                print(f"📋 Status: {status_message}")
-                print(f"📁 Result file: {result_filepath}")
-                
-                # Handle the result file path
-                if hasattr(result_filepath, 'save'):  # PIL Image
-                    print("✅ Got PIL Image, converting to bytes")
-                    import io
-                    img_buffer = io.BytesIO()
-                    result_filepath.save(img_buffer, format='JPEG', quality=90)
-                    return img_buffer.getvalue()
+                    print(f"🎭 Face swap attempt {attempt + 1}/{max_retries}")
                     
-                elif isinstance(result_filepath, str) and os.path.exists(result_filepath):  # File path
-                    print(f"✅ Got file path: {result_filepath}")
-                    with open(result_filepath, 'rb') as f:
-                        return f.read()
+                    client = self.get_client()
+                    
+                    # Optional: Setup FaceFusion first
+                    try:
+                        self.setup_facefusion()
+                    except Exception as setup_error:
+                        print(f"⚠️ Setup failed: {setup_error}, continuing anyway...")
+                    
+                    log_memory_usage("before_api_call")
+                    
+                    # Call the correct API endpoint with proper parameters
+                    result = client.predict(
+                        source_url=source_url,  # 👤 Source Image URL (Face to transfer)
+                        target_url=target_url,  # 🎯 Target Image URL (Body/scene)
+                        api_name="/process_images"
+                    )
+                    
+                    log_memory_usage("after_api_call")
+                    
+                    print(f"📋 Gradio result: {type(result)} - {result}")
+                    
+                    if not result or len(result) < 2:
+                        raise Exception(f"Invalid result format: {result}")
+                    
+                    result_filepath = result[0]  # Image file path
+                    status_message = result[1]   # Status message
+                    
+                    print(f"📋 Status: {status_message}")
+                    print(f"📁 Result file: {result_filepath}")
+                    
+                    # Handle the result file path
+                    result_data = None
+                    
+                    if hasattr(result_filepath, 'save'):  # PIL Image
+                        print("✅ Got PIL Image, converting to bytes")
+                        import io
+                        img_buffer = io.BytesIO()
+                        result_filepath.save(img_buffer, format='JPEG', quality=90)
+                        result_data = img_buffer.getvalue()
                         
-                elif isinstance(result_filepath, dict):  # Gradio file object
-                    if 'path' in result_filepath and os.path.exists(result_filepath['path']):
-                        print(f"✅ Got Gradio file object: {result_filepath['path']}")
-                        with open(result_filepath['path'], 'rb') as f:
-                            return f.read()
-                    elif 'url' in result_filepath:
-                        print(f"✅ Got URL from Gradio: {result_filepath['url']}")
-                        # Download from URL
-                        response = requests.get(result_filepath['url'], timeout=60)
-                        response.raise_for_status()
-                        return response.content
+                    elif isinstance(result_filepath, str) and os.path.exists(result_filepath):  # File path
+                        print(f"✅ Got file path: {result_filepath}")
+                        with open(result_filepath, 'rb') as f:
+                            result_data = f.read()
                         
-                else:
-                    raise Exception(f"Unexpected result format: {type(result_filepath)} - {result_filepath}")
+                        # 🔥 NEW: Delete temp file immediately
+                        try:
+                            os.unlink(result_filepath)
+                            print(f"🧹 Deleted temp file: {result_filepath}")
+                        except Exception as cleanup_error:
+                            print(f"⚠️ Failed to delete temp file: {cleanup_error}")
+                            
+                    elif isinstance(result_filepath, dict):  # Gradio file object
+                        if 'path' in result_filepath and os.path.exists(result_filepath['path']):
+                            print(f"✅ Got Gradio file object: {result_filepath['path']}")
+                            with open(result_filepath['path'], 'rb') as f:
+                                result_data = f.read()
+                            
+                            # 🔥 NEW: Delete temp file immediately
+                            try:
+                                os.unlink(result_filepath['path'])
+                                print(f"🧹 Deleted temp file: {result_filepath['path']}")
+                            except Exception as cleanup_error:
+                                print(f"⚠️ Failed to delete temp file: {cleanup_error}")
+                                
+                        elif 'url' in result_filepath:
+                            print(f"✅ Got URL from Gradio: {result_filepath['url']}")
+                            # Download from URL
+                            response = requests.get(result_filepath['url'], timeout=60)
+                            response.raise_for_status()
+                            result_data = response.content
+                            
+                    else:
+                        raise Exception(f"Unexpected result format: {type(result_filepath)} - {result_filepath}")
                     
-            except Exception as e:
-                error_msg = str(e).lower()
-                print(f"❌ Face swap attempt {attempt + 1} failed: {e}")
-                
-                # Handle specific error types
-                if 'authentication' in error_msg or 'unauthorized' in error_msg:
-                    raise Exception("Authentication failed. Please check your HuggingFace API token.")
-                elif 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
-                    print("🚨 Rate limited - resetting client")
-                    self.client = None  # Reset client
+                    if result_data:
+                        # 🔥 NEW: Force cleanup and garbage collection
+                        gc.collect()
+                        log_memory_usage("after_processing")
+                        return result_data
+                    else:
+                        raise Exception("No result data extracted")
+                        
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    print(f"❌ Face swap attempt {attempt + 1} failed: {e}")
                     
-                    if attempt < max_retries - 1:
-                        delay = (2 ** attempt) * 3 + random.uniform(0, 3)
-                        print(f"⏳ Waiting {delay:.1f}s...")
+                    # Handle specific error types
+                    if 'authentication' in error_msg or 'unauthorized' in error_msg:
+                        raise Exception("Authentication failed. Please check your HuggingFace API token.")
+                    elif 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
+                        print("🚨 Rate limited - resetting client")
+                        self.client = None  # Reset client
+                        
+                        if attempt < max_retries - 1:
+                            delay = (2 ** attempt) * 3 + random.uniform(0, 3)
+                            print(f"⏳ Waiting {delay:.1f}s...")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            raise Exception("Rate limited after all retries")
+                    
+                    elif attempt < max_retries - 1:
+                        delay = 5 + random.uniform(0, 2)
+                        print(f"⏳ Retrying in {delay:.1f}s...")
                         time.sleep(delay)
                         continue
                     else:
-                        raise Exception("Rate limited after all retries")
-                
-                elif attempt < max_retries - 1:
-                    delay = 5 + random.uniform(0, 2)
-                    print(f"⏳ Retrying in {delay:.1f}s...")
-                    time.sleep(delay)
-                    continue
-                else:
-                    break
-        
-        raise Exception(f"All face swap attempts failed")
+                        break
+            
+            raise Exception(f"All face swap attempts failed")
+            
+        finally:
+            # 🔥 NEW: Always cleanup at the end
+            gc.collect()
+            log_memory_usage("cleanup_complete")
 
 def process_face_swap(job_id):
     """
-    Process a face swap job using the improved Gradio client
+    Process a face swap job using the improved Gradio client with memory management
     """
     from .models import FaceSwapJob
     from django.utils import timezone
+    
+    log_memory_usage("job_start")
     
     try:
         job = FaceSwapJob.objects.get(id=job_id)
@@ -865,6 +1003,7 @@ def process_face_swap(job_id):
         job.completed_at = timezone.now()
         job.save()
         
+        log_memory_usage("job_complete")
         print(f"✅ Face swap job {job_id} completed successfully")
         return True
         
@@ -880,6 +1019,10 @@ def process_face_swap(job_id):
         except:
             pass
         return False
+    finally:
+        # 🔥 NEW: Force cleanup
+        gc.collect()
+        log_memory_usage("job_cleanup")
 ```
 
 ## faceswap/urls.py
@@ -1339,11 +1482,89 @@ class TestGradioConnectionView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 ```
 
+## imagegen/tasks.py
+```python
+from celery import shared_task
+from django.core.management import call_command
+from django.utils import timezone
+from .models import GeneratedImage
+import logging
+
+logger = logging.getLogger(__name__)
+
+@shared_task(bind=True, max_retries=3)
+def cleanup_expired_images_task(self):
+    """
+    Celery task to clean up expired images from Cloudinary
+    Runs every 6 hours automatically
+    """
+    try:
+        logger.info("🧹 Starting scheduled cleanup of expired images")
+        
+        # Find expired images
+        now = timezone.now()
+        expired_images = GeneratedImage.objects.filter(
+            expires_at__lt=now,
+            is_expired=False,
+            cleanup_attempted=False
+        )
+        
+        count = expired_images.count()
+        logger.info(f"📊 Found {count} expired images to clean up")
+        
+        if count == 0:
+            logger.info("✅ No expired images found")
+            return "No images to clean up"
+        
+        # Process cleanup
+        deleted_count = 0
+        failed_count = 0
+        
+        for img in expired_images:
+            try:
+                deleted_files = img.expire_and_cleanup()
+                logger.info(f"✅ Cleaned up image {img.id}: {deleted_files}")
+                deleted_count += 1
+            except Exception as e:
+                logger.error(f"❌ Failed to cleanup image {img.id}: {e}")
+                failed_count += 1
+        
+        result = f"Cleanup complete: {deleted_count} deleted, {failed_count} failed"
+        logger.info(f"🎉 {result}")
+        return result
+        
+    except Exception as exc:
+        logger.error(f"❌ Cleanup task failed: {exc}")
+        # Retry with exponential backoff
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+@shared_task
+def manual_cleanup_task(force=False):
+    """
+    Manual cleanup task for testing/admin use
+    """
+    if force:
+        # Force cleanup all images (for testing)
+        call_command('cleanup_expired_images', '--force')
+        return "Force cleanup completed"
+    else:
+        # Normal cleanup
+        call_command('cleanup_expired_images')
+        return "Manual cleanup completed"
+```
+
 ## imagegen/models.py
 ```python
 from django.db import models
 from django.conf import settings
 from cloudinary_storage.storage import MediaCloudinaryStorage
+from django.utils import timezone
+from datetime import timedelta
+import cloudinary.uploader
+
+def get_expiration_time():
+    """Get expiration time 48 hours from now"""
+    return timezone.now() + timedelta(hours=48)
 
 class GeneratedImage(models.Model):
     user = models.ForeignKey(
@@ -1357,19 +1578,57 @@ class GeneratedImage(models.Model):
     match_name = models.CharField(max_length=100)
     selfie = models.ImageField(
         upload_to="uploads/selfies/",
-        storage=MediaCloudinaryStorage()  # ✅ Explicitly use Cloudinary
+        storage=MediaCloudinaryStorage()
     )
     output_image = models.ImageField(
         upload_to="uploads/fused/", 
         null=True, 
         blank=True,
-        storage=MediaCloudinaryStorage()  # ✅ Explicitly use Cloudinary
+        storage=MediaCloudinaryStorage()
     )
     output_url = models.URLField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    # 🔥 FIXED: Expiration fields with proper function
+    expires_at = models.DateTimeField(default=get_expiration_time)
+    is_expired = models.BooleanField(default=False)
+    cleanup_attempted = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.match_name} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+    
+    def delete_from_cloudinary(self):
+        """Delete associated images from Cloudinary"""
+        deleted_files = []
+        
+        try:
+            if self.selfie and hasattr(self.selfie, 'public_id'):
+                cloudinary.uploader.destroy(self.selfie.public_id)
+                deleted_files.append(f"selfie:{self.selfie.public_id}")
+        except Exception as e:
+            print(f"⚠️ Error deleting selfie: {e}")
+            
+        try:
+            if self.output_image and hasattr(self.output_image, 'public_id'):
+                cloudinary.uploader.destroy(self.output_image.public_id)
+                deleted_files.append(f"output:{self.output_image.public_id}")
+        except Exception as e:
+            print(f"⚠️ Error deleting output: {e}")
+            
+        return deleted_files
+    
+    def expire_and_cleanup(self):
+        """Mark as expired and delete from Cloudinary"""
+        deleted_files = self.delete_from_cloudinary()
+        self.is_expired = True
+        self.cleanup_attempted = True
+        self.save()
+        return deleted_files
+    
+    @property
+    def is_expired_now(self):
+        """Check if image should be expired"""
+        return timezone.now() > self.expires_at
 ```
 
 ## imagegen/serializers.py
@@ -1516,6 +1775,39 @@ class GeneratedImageAdmin(admin.ModelAdmin):
 
 ```
 
+## imagegen/utils.py
+```python
+from PIL import Image
+import io
+from django.core.files.base import ContentFile
+
+def compress_image(image_file, max_size=(800, 800), quality=75):
+    """Compress uploaded images to reduce memory usage"""
+    try:
+        img = Image.open(image_file)
+        
+        # Convert to RGB if necessary (removes alpha channels)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = background
+        
+        # Resize to reasonable dimensions
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        
+        # Compress
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=quality, optimize=True)
+        output.seek(0)
+        
+        return ContentFile(output.getvalue())
+    except Exception as e:
+        print(f"Compression error: {e}")
+        return image_file
+```
+
 ## imagegen/urls.py
 ```python
 from django.urls import path
@@ -1531,14 +1823,14 @@ urlpatterns = [
 
 ## imagegen/views.py
 ```python
-# imagegen/views.py - Updated with 65+ historical figures
+# imagegen/views.py - Updated with memory optimization
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 from .models import GeneratedImage
 from .face_match import match_face
-from faceswap.huggingface_utils import FaceFusionClient  # Use the fixed client!
+from faceswap.huggingface_utils import FaceFusionClient
 import tempfile
 import base64
 from django.core.files.base import ContentFile
@@ -1547,11 +1839,13 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 import io
 import time
 import random
+from django.core.cache import cache
+from .utils import compress_image
+
+# 🔥 NEW: Memory management settings
+MAX_CONCURRENT_JOBS = 2  # Limit simultaneous face swaps
 
 # Map historical figures to their Cloudinary URLs - UPDATED WITH 65+ FIGURES
-# Generated from Cloudinary root level
-# Copy this dict to your Django views.py
-
 HISTORICAL_FIGURES = {
     "Abraham Lincoln": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608917/Abraham_Lincoln_o5kbjh.png",
     "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749854959/alexander_the_great_j5icxu.png",
@@ -1572,7 +1866,7 @@ HISTORICAL_FIGURES = {
     "Danny Devito": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Danny_Devito_ajkoal.png",
     "Donald Trump": "https://res.cloudinary.com/dddye9wli/image/upload/v1750550608/Donald_Trump_yqggmn.png",
     "Elon Musk": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Elon_Musk_c3ii8i.png",
-    "Elvis": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png", #god dammit
+    "Elvis": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png",
     "Elvisnotsinging": "https://res.cloudinary.com/dddye9wli/image/upload/v1749857225/elvisnotsinging_twnnta.png",
     "Frida Khalo": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921232/frida_khalo_gzibma.png",
     "Genghis Khan": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608927/Genghis_Khan_ewsfvk.png",
@@ -1620,35 +1914,49 @@ HISTORICAL_FIGURES = {
 }
 
 
-
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
+        # 🔥 NEW: Check server capacity FIRST
+        active_jobs = cache.get('active_face_swap_jobs', 0)
+        if active_jobs >= MAX_CONCURRENT_JOBS:
+            return Response({
+                "error": "Server is busy processing other requests. Please try again in 30 seconds.",
+                "retry_after": 30
+            }, status=503)
+
         selfie = request.FILES.get("selfie")
         if not selfie:
-            return Response({"error": "Selfie is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Selfie is required"}, status=400)
 
-        # Read the file content once and store it
-        selfie_content = selfie.read()
-        
-        # Save uploaded selfie to temporary file for face matching
+        # 🔥 NEW: Compress the image immediately
+        print(f"📷 Original image size: {selfie.size} bytes")
+        compressed_selfie = compress_image(selfie)
+        selfie_content = compressed_selfie.read()
+        print(f"📦 Compressed image size: {len(selfie_content)} bytes")
+
+        # Create new file object with compressed data
+        selfie_for_model = InMemoryUploadedFile(
+            file=io.BytesIO(selfie_content),
+            field_name='selfie',
+            name=f"compressed_{selfie.name}",
+            content_type='image/jpeg',
+            size=len(selfie_content),
+            charset=None,
+        )
+
+        # Save to temp file for face matching
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
             tmp.write(selfie_content)
             tmp_path = tmp.name
 
-        # Create a new file object for Django model (reset file pointer)
-        selfie_for_model = InMemoryUploadedFile(
-            file=io.BytesIO(selfie_content),
-            field_name=selfie.field_name,
-            name=selfie.name,
-            content_type=selfie.content_type,
-            size=len(selfie_content),
-            charset=selfie.charset,
-        )
-
         temp_image = None
         try:
+            # 🔥 NEW: Increment job counter
+            cache.set('active_face_swap_jobs', active_jobs + 1, timeout=300)
+            print(f"🔢 Active jobs: {active_jobs + 1}/{MAX_CONCURRENT_JOBS}")
+            
             # Step 1: Match face with historical figures
             print("🔍 Starting face matching...")
             match_result = match_face(tmp_path)
@@ -1727,9 +2035,15 @@ class GenerateImageView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         finally:
+            # 🔥 NEW: Always decrement counter and cleanup
+            current_jobs = cache.get('active_face_swap_jobs', 1)
+            cache.set('active_face_swap_jobs', max(0, current_jobs - 1), timeout=300)
+            print(f"🔢 Jobs after cleanup: {max(0, current_jobs - 1)}")
+            
             # Clean up temporary file
             try:
                 os.unlink(tmp_path)
+                print(f"🧹 Cleaned up temp file: {tmp_path}")
             except:
                 pass
 
@@ -1783,6 +2097,28 @@ class ListGeneratedImagesView(APIView):
         return Response({"images": results})
 ```
 
+## django_project/celery_urls.py
+```python
+# django_project/celery_urls.py
+# Minimal URL configuration for Celery workers (bypasses admin)
+
+from django.urls import path
+from django.http import JsonResponse
+
+def celery_health_check(request):
+    """Simple health check for Celery workers"""
+    return JsonResponse({
+        "status": "celery_worker_healthy",
+        "service": "celery",
+        "message": "Celery worker URLs loaded successfully"
+    })
+
+# Minimal URL patterns that don't require admin or complex routing
+urlpatterns = [
+    path("health/", celery_health_check, name="celery-health"),
+]
+```
+
 ## django_project/asgi.py
 ```python
 """
@@ -1806,7 +2142,39 @@ application = get_asgi_application()
 
 ## django_project/__init__.py
 ```python
+# django_project/__init__.py
+from __future__ import absolute_import, unicode_literals
 
+# This will make sure the app is always imported when
+# Django starts so that shared_task will use this app.
+from .celery import app as celery_app
+
+__all__ = ('celery_app',)
+```
+
+## django_project/celery.py
+```python
+from __future__ import absolute_import, unicode_literals
+import os
+from celery import Celery
+
+# Set default Django settings module for the 'celery' program
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.dev')
+
+app = Celery('django_project')
+
+# Using a string here means the worker doesn't have to serialize
+# the configuration object to child processes
+app.config_from_object('django.conf:settings', namespace='CELERY')
+
+# Load task modules from all registered Django apps
+app.autodiscover_tasks()
+
+@app.task(bind=True)
+def debug_task(self):
+    print(f'Request: {self.request!r}')
+
+print("✅ Celery app configured successfully")
 ```
 
 ## django_project/urls.py
@@ -2190,51 +2558,107 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[
     "localhost", "127.0.0.1", "0.0.0.0", "web", "*.fly.dev"
 ])
 
-# Installed apps
-INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',  # ✅ This is required for collectstatic
-    'cloudinary_storage',
-    'cloudinary',
+# 🔥 SIMPLE CELERY FIX - detect if this is a Celery worker
+import sys
 
-    # Custom apps
-    'accounts.apps.AccountsConfig',
-    'chat.apps.ChatConfig',
-    'faceswap.apps.FaceswapConfig',
+# Check if this is a Celery worker process
+IS_CELERY = (
+    os.environ.get('IS_CELERY_WORKER') == 'true' or
+    'celery' in sys.argv[0] or 
+    'worker' in sys.argv or
+    'beat' in sys.argv
+)
 
-    # Third-party
-    'django.contrib.sites',
-    'allauth',
-    'allauth.account',
-    'allauth.socialaccount',
-    'allauth.socialaccount.providers.google',
+if IS_CELERY:
+    print("🔧 Celery worker detected - applying minimal configuration...")
+    
+    # Minimal apps for Celery workers
+    INSTALLED_APPS = [
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'django.contrib.sessions',
+        'django.contrib.messages',
+        'django.contrib.staticfiles',
+        'cloudinary_storage',
+        'cloudinary',
+        
+        # Custom apps (needed for tasks)
+        'accounts.apps.AccountsConfig',
+        'faceswap.apps.FaceswapConfig',
+        'imagegen',
+        
+        # Celery apps
+        'django_celery_beat',
+        'django_celery_results',
+        
+        'rest_framework',
+        'rest_framework.authtoken',
+    ]
+    
+    # Minimal middleware for Celery workers
+    MIDDLEWARE = [
+        'django.middleware.security.SecurityMiddleware',
+        'django.contrib.sessions.middleware.SessionMiddleware',
+        'django.middleware.common.CommonMiddleware',
+        'django.middleware.csrf.CsrfViewMiddleware',
+        'django.contrib.auth.middleware.AuthenticationMiddleware',
+        'django.contrib.messages.middleware.MessageMiddleware',
+    ]
+    
+    # Use minimal URLs for Celery
+    ROOT_URLCONF = 'django_project.celery_urls'
+    
+else:
+    print("🌐 Standard Django configuration loaded")
+    
+    # Full apps for Django web server
+    INSTALLED_APPS = [
+        'django.contrib.admin',
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'django.contrib.sessions',
+        'django.contrib.messages',
+        'django.contrib.staticfiles',
+        'cloudinary_storage',
+        'cloudinary',
 
-    'imagegen',
-    'corsheaders',
+        # Custom apps
+        'accounts.apps.AccountsConfig',
+        'chat.apps.ChatConfig',
+        'faceswap.apps.FaceswapConfig',
 
-    'rest_framework',
-    'rest_framework.authtoken', 
-]
+        # Third-party
+        'django.contrib.sites',
+        'allauth',
+        'allauth.account',
+        'allauth.socialaccount',
+        'allauth.socialaccount.providers.google',
 
-# Middleware
-MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'allauth.account.middleware.AccountMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-]
+        'imagegen',
+        'corsheaders',
 
-ROOT_URLCONF = 'django_project.urls'
+        'rest_framework',
+        'rest_framework.authtoken',
+
+        'django_celery_beat',
+        'django_celery_results', 
+    ]
+
+    # Full middleware for Django web server
+    MIDDLEWARE = [
+        'corsheaders.middleware.CorsMiddleware',
+        'django.middleware.security.SecurityMiddleware',
+        'whitenoise.middleware.WhiteNoiseMiddleware',
+        'django.contrib.sessions.middleware.SessionMiddleware',
+        'allauth.account.middleware.AccountMiddleware',
+        'django.middleware.common.CommonMiddleware',
+        'django.middleware.csrf.CsrfViewMiddleware',
+        'django.contrib.auth.middleware.AuthenticationMiddleware',
+        'django.contrib.messages.middleware.MessageMiddleware',
+        'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    ]
+    
+    ROOT_URLCONF = 'django_project.urls'
 
 # Templates
 TEMPLATES = [
@@ -2356,94 +2780,117 @@ REST_FRAMEWORK = {
 }
 
 # HuggingFace Configuration - FIXED
-# 🔑 Use space name format (not full URL) for Gradio client
 HUGGINGFACE_SPACE_NAME = env('HUGGINGFACE_SPACE_NAME', default='mnraynor90/facefusionfastapi-private')
 HUGGINGFACE_API_TOKEN = env("HUGGINGFACE_API_TOKEN", default="dummy")
 
 print(f"🔧 HuggingFace Space: {HUGGINGFACE_SPACE_NAME}")
 print(f"🔑 HuggingFace Token: {'***configured***' if HUGGINGFACE_API_TOKEN != 'dummy' else 'NOT SET'}")
 
-# 🔥 ROBUST CORS CONFIGURATION (FIXED) 🔥
+# CORS Configuration (only for non-Celery)
+if not IS_CELERY:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "https://ai-convert.netlify.app",
+    ]
+    CORS_ALLOW_CREDENTIALS = True
+    CORS_PREFLIGHT_MAX_AGE = 86400
 
-# 🧪 TEMPORARY DEBUG: Allow all origins to test if CORS is the issue
-CORS_ALLOW_ALL_ORIGINS = True  # ← TEMPORARY - CHANGE TO FALSE AFTER TESTING
+    CORS_ALLOW_HEADERS = [
+        'accept', 'accept-encoding', 'authorization', 'content-type', 'dnt', 'origin',
+        'user-agent', 'x-csrftoken', 'x-requested-with', 'cache-control', 'pragma',
+        'expires', 'content-length', 'host', 'referer', 'sec-ch-ua', 'sec-ch-ua-mobile',
+        'sec-ch-ua-platform', 'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site',
+    ]
 
-# Specific allowed origins (when CORS_ALLOW_ALL_ORIGINS = False)
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Vite dev server
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",  # React dev server
-    "https://ai-convert.netlify.app",  # Your specific Netlify URL
-]
+    CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'HEAD']
 
-# CORS Configuration
-CORS_ALLOW_CREDENTIALS = True
-CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
-
-# Comprehensive headers list
-CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
-    'cache-control',
-    'pragma',
-    'expires',
-    'content-length',
-    'host',
-    'referer',
-    'sec-ch-ua',
-    'sec-ch-ua-mobile',
-    'sec-ch-ua-platform',
-    'sec-fetch-dest',
-    'sec-fetch-mode',
-    'sec-fetch-site',
-]
-
-# All HTTP methods
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-    'HEAD',
-]
-
-# ✅ REMOVED: CORS_REPLACE_HTTPS_REFERER (deprecated setting)
-
-print(f"🌐 CORS configured for origins: {CORS_ALLOWED_ORIGINS}")
-print(f"🔥 CORS_ALLOW_ALL_ORIGINS: {CORS_ALLOW_ALL_ORIGINS}")
-print(f"🔑 CORS_ALLOW_CREDENTIALS: {CORS_ALLOW_CREDENTIALS}")
-
-# 🧪 Add request logging to see if requests are reaching Django
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
+# Conditional Logging
+if IS_CELERY:
+    # Simplified logging for Celery workers
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+            },
         },
-    },
-    'loggers': {
-        'corsheaders': {
+        'root': {
             'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': True,
+            'level': 'INFO',
         },
-        'django.request': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': True,
+        'loggers': {
+            'celery': {
+                'handlers': ['console'],
+                'level': 'INFO',
+                'propagate': False,
+            },
         },
+    }
+    
+    # Disable problematic system checks for Celery
+    SILENCED_SYSTEM_CHECKS = [
+        'admin.E404',
+        'urls.E007',
+        'urls.W005',
+        'security.W004',
+        'security.W008',
+    ]
+    
+    print("✅ Celery worker configuration applied")
+else:
+    # Full logging for Django
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+            },
+        },
+        'loggers': {
+            'corsheaders': {
+                'handlers': ['console'],
+                'level': 'DEBUG',
+                'propagate': True,
+            },
+            'django.request': {
+                'handlers': ['console'],
+                'level': 'DEBUG',
+                'propagate': True,
+            },
+        },
+    }
+
+# Celery Configuration
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_CACHE_BACKEND = 'django-cache'
+CELERY_RESULT_EXPIRES = 7 * 24 * 60 * 60  # 7 days
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Periodic Tasks Configuration
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-expired-images': {
+        'task': 'imagegen.tasks.cleanup_expired_images_task',
+        'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
+        'options': {'expires': 60 * 60}  # Task expires in 1 hour if not picked up
     },
 }
+
+print(f"✅ Settings loaded - IS_CELERY: {IS_CELERY}")
 ```
 
 ## Dockerfile

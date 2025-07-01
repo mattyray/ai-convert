@@ -3,8 +3,11 @@ import { Sparkles, AlertCircle, History } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultDisplay from './components/ResultDisplay';
+import RandomizeButton from './components/RandomizeButton';
+import RegistrationGate from './components/RegistrationGate';
 import { FaceSwapAPI } from './services/api';
-import type { FaceSwapResult, ProgressStep } from './types/index';
+import { useUsage } from './hooks/useUsage';
+import type { FaceSwapResult, ProgressStep, UsageLimitError } from './types/index';
 
 type AppState = 'upload' | 'processing' | 'result' | 'error';
 
@@ -13,12 +16,18 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [result, setResult] = useState<FaceSwapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showRegistrationGate, setShowRegistrationGate] = useState(false);
+  const [lastFeatureAttempted, setLastFeatureAttempted] = useState<'match' | 'randomize' | undefined>();
+  
   const [processing, setProcessing] = useState({
     step: 'uploading' as ProgressStep,
     progress: 0,
     message: 'Preparing your transformation...',
     matchedFigure: undefined as string | undefined,
   });
+
+  // Usage tracking hook
+  const { usage, loading: usageLoading, canUseFeature, handleUsageLimitError, checkUsage } = useUsage();
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
@@ -30,8 +39,16 @@ function App() {
     setError(null);
   };
 
-  const handleStartProcessing = async () => {
+  const handleStartProcessing = async (isRandomize = false) => {
     if (!selectedFile) return;
+
+    // Check if user can use this feature
+    const featureType = isRandomize ? 'randomize' : 'match';
+    if (!canUseFeature(featureType)) {
+      setLastFeatureAttempted(featureType);
+      setShowRegistrationGate(true);
+      return;
+    }
 
     setState('processing');
     setError(null);
@@ -46,27 +63,43 @@ function App() {
       updateProgress('uploading', 10, 'Uploading your selfie securely...');
       
       // Step 2: Start the API call
-      updateProgress('analyzing', 25, 'AI is analyzing your facial features...');
+      const analysisMessage = isRandomize 
+        ? 'AI is preparing a random transformation...' 
+        : 'AI is analyzing your facial features...';
+      updateProgress('analyzing', 25, analysisMessage);
       
-      const apiPromise = FaceSwapAPI.generateFaceSwap(selectedFile, (uploadProgress) => {
-        updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
-      });
+      const apiPromise = isRandomize
+        ? FaceSwapAPI.randomizeFaceSwap(selectedFile, (uploadProgress) => {
+            updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
+          })
+        : FaceSwapAPI.generateFaceSwap(selectedFile, (uploadProgress) => {
+            updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
+          });
       
       // Simulate analysis step
       setTimeout(() => {
-        updateProgress('analyzing', 45, 'Identifying unique facial characteristics...');
+        const progressMessage = isRandomize 
+          ? 'Spinning the wheel of history...' 
+          : 'Identifying unique facial characteristics...';
+        updateProgress('analyzing', 45, progressMessage);
       }, 1000);
       
       // Simulate matching step
       setTimeout(() => {
-        updateProgress('matching', 65, 'Searching through historical figures...');
+        const matchingMessage = isRandomize 
+          ? 'Selecting your random historical twin...' 
+          : 'Searching through historical figures...';
+        updateProgress('matching', 65, matchingMessage);
       }, 2500);
       
       // Wait for API response
       const apiResult = await apiPromise;
       
       // Step 3: Show match found
-      updateProgress('matching', 80, `Perfect match found: ${apiResult.match_name}!`, apiResult.match_name);
+      const matchMessage = isRandomize 
+        ? `Random selection: ${apiResult.match_name}!` 
+        : `Perfect match found: ${apiResult.match_name}!`;
+      updateProgress('matching', 80, matchMessage, apiResult.match_name);
       
       // Step 4: Face swapping
       setTimeout(() => {
@@ -77,13 +110,33 @@ function App() {
       setTimeout(() => {
         setResult(apiResult);
         setState('result');
+        // Refresh usage data after successful operation
+        checkUsage();
       }, 2000);
       
     } catch (err) {
       console.error('Face swap error:', err);
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
-      setState('error');
+      
+      // Check if it's a usage limit error
+      if (err && typeof err === 'object' && 'usage' in err) {
+        const usageLimitError = err as UsageLimitError;
+        handleUsageLimitError(usageLimitError);
+        setLastFeatureAttempted(usageLimitError.feature_type);
+        setShowRegistrationGate(true);
+        setState('upload'); // Go back to upload state
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+        setState('error');
+      }
     }
+  };
+
+  const handleRandomize = () => {
+    handleStartProcessing(true);
+  };
+
+  const handleRegularMatch = () => {
+    handleStartProcessing(false);
   };
 
   const handleTryAgain = () => {
@@ -97,6 +150,52 @@ function App() {
       message: 'Preparing your transformation...',
       matchedFigure: undefined,
     });
+  };
+
+  const handleSignUp = () => {
+    // TODO: Implement signup functionality
+    console.log('Sign up clicked');
+    setShowRegistrationGate(false);
+  };
+
+  const handleLogin = () => {
+    // TODO: Implement login functionality  
+    console.log('Login clicked');
+    setShowRegistrationGate(false);
+  };
+
+  const renderUsageIndicator = () => {
+    if (usageLoading || !usage || usage.unlimited) return null;
+
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <h3 className="font-medium text-blue-900 mb-2">Your Free Usage</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="text-center">
+            <div className={`text-lg font-bold ${usage.can_match ? 'text-green-600' : 'text-red-600'}`}>
+              {usage.matches_used}/{usage.matches_limit}
+            </div>
+            <div className="text-gray-600">Face Matches</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-lg font-bold ${usage.can_randomize ? 'text-green-600' : 'text-red-600'}`}>
+              {usage.randomizes_used}/{usage.randomizes_limit}
+            </div>
+            <div className="text-gray-600">Randomizes</div>
+          </div>
+        </div>
+        {usage.is_limited && (
+          <div className="mt-3 text-center">
+            <button
+              onClick={() => setShowRegistrationGate(true)}
+              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+            >
+              Get unlimited access →
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderContent = () => {
@@ -123,6 +222,9 @@ function App() {
               </div>
             </div>
 
+            {/* Usage Indicator */}
+            {renderUsageIndicator()}
+
             <FileUpload
               onFileSelect={handleFileSelect}
               selectedFile={selectedFile}
@@ -130,16 +232,42 @@ function App() {
             />
 
             {selectedFile && (
-              <div className="mt-8 text-center">
-                <button
-                  onClick={handleStartProcessing}
-                  className="btn-primary text-lg px-8 py-4"
-                >
-                  🔮 Find My Historical Twin
-                </button>
-                <p className="text-sm text-gray-500 mt-3">
-                  This will take about 30 seconds
-                </p>
+              <div className="mt-8 space-y-4">
+                {/* Regular Match Button */}
+                <div className="text-center">
+                  <button
+                    onClick={handleRegularMatch}
+                    disabled={!canUseFeature('match')}
+                    className={`text-lg px-8 py-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center gap-3 mx-auto ${
+                      canUseFeature('match')
+                        ? 'btn-primary'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <Sparkles size={20} />
+                    🔮 Find My Historical Twin
+                  </button>
+                  <p className="text-sm text-gray-500 mt-2">
+                    AI analyzes your face to find the best match
+                  </p>
+                </div>
+
+                {/* OR Divider */}
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-white text-gray-500">OR</span>
+                  </div>
+                </div>
+
+                {/* Randomize Button */}
+                <RandomizeButton
+                  onRandomize={handleRandomize}
+                  hasSelectedFile={!!selectedFile}
+                  usage={usage}
+                />
               </div>
             )}
 
@@ -238,14 +366,25 @@ function App() {
               </div>
             </div>
             
-            {state !== 'upload' && (
-              <button
-                onClick={handleTryAgain}
-                className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                ← Start Over
-              </button>
-            )}
+            <div className="flex items-center gap-4">
+              {/* Usage Summary in Header */}
+              {usage && !usage.unlimited && !usageLoading && (
+                <div className="hidden sm:flex items-center gap-3 text-sm text-gray-600">
+                  <span>Matches: {usage.matches_used}/{usage.matches_limit}</span>
+                  <span>•</span>
+                  <span>Randomizes: {usage.randomizes_used}/{usage.randomizes_limit}</span>
+                </div>
+              )}
+              
+              {state !== 'upload' && (
+                <button
+                  onClick={handleTryAgain}
+                  className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  ← Start Over
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -254,6 +393,16 @@ function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {renderContent()}
       </main>
+
+      {/* Registration Gate Modal */}
+      <RegistrationGate
+        isOpen={showRegistrationGate}
+        onClose={() => setShowRegistrationGate(false)}
+        onSignUp={handleSignUp}
+        onLogin={handleLogin}
+        usage={usage}
+        lastFeatureAttempted={lastFeatureAttempted}
+      />
 
       {/* Footer */}
       <footer className="bg-gray-50 border-t border-gray-200 mt-16">

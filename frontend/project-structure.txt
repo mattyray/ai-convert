@@ -1,0 +1,45 @@
+.
+├── Dockerfile
+├── Dockerfile.dev
+├── eslint.config.js
+├── fly.toml
+├── index.html
+├── netlify.toml
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── project-structure.txt
+├── public
+│   └── vite.svg
+├── README.md
+├── scripts
+│   ├── front_export.py
+│   └── frontend_code_snapshot.txt
+├── src
+│   ├── App.css
+│   ├── App.tsx
+│   ├── assets
+│   │   └── react.svg
+│   ├── components
+│   │   ├── ErrorBoundary.tsx
+│   │   ├── FileUpload.tsx
+│   │   ├── ProcessingStatus.tsx
+│   │   ├── RandomizeButton.tsx
+│   │   ├── RegistrationGate.tsx
+│   │   └── ResultDisplay.tsx
+│   ├── hooks
+│   │   └── useUsage.ts
+│   ├── index.css
+│   ├── main.tsx
+│   ├── services
+│   │   └── api.ts
+│   ├── types
+│   │   └── index.ts
+│   └── vite-env.d.ts
+├── tailwind.config.js
+├── tsconfig.app.json
+├── tsconfig.json
+├── tsconfig.node.json
+└── vite.config.ts
+
+9 directories, 34 files

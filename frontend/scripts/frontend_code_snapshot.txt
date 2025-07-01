@@ -1,6 +1,6 @@
 # FRONTEND CODE SNAPSHOT
 # Generated for AI Face Swap App
-# Total files: 27
+# Total files: 30
 
 
 
@@ -25,10 +25,16 @@ export interface FaceSwapResult {
   output_image_url: string;
   original_selfie_url: string;
   historical_figure_url: string;
+  is_randomized?: boolean;
+  usage?: UsageData | null;
 }
 
 export interface ApiError {
   error: string;
+  message?: string;
+  feature_type?: 'match' | 'randomize';
+  usage?: UsageData;
+  registration_required?: boolean;
 }
 
 export type ProgressStep = 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
@@ -46,52 +52,131 @@ export interface HistoricalFigure {
   confidence?: number;
 }
 
+// NEW - Usage tracking types
+export interface UsageData {
+  matches_used: number;
+  matches_limit: number;
+  randomizes_used: number;
+  randomizes_limit: number;
+  can_match: boolean;
+  can_randomize: boolean;
+  is_limited: boolean;
+  unlimited?: boolean;
+  user_authenticated?: boolean;
+}
+
+export interface UsageLimitError extends ApiError {
+  usage: UsageData;
+  registration_required: true;
+}
+
+
+
+# ==== src/hooks/useUsage.ts ====
+
+import { useState, useEffect, useCallback } from 'react';
+import { FaceSwapAPI } from '../services/api';
+import type { UsageData, UsageLimitError } from '../types/index';
+
+interface UseUsageReturn {
+  usage: UsageData | null;
+  loading: boolean;
+  error: string | null;
+  isLimited: boolean;
+  canUseFeature: (feature: 'match' | 'randomize') => boolean;
+  checkUsage: () => Promise<void>;
+  handleUsageLimitError: (error: UsageLimitError) => void;
+  resetUsage: () => void;
+}
+
+export const useUsage = (): UseUsageReturn => {
+  const [usage, setUsage] = useState<UsageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Check if user has hit all limits
+  const isLimited = usage ? usage.is_limited && !usage.unlimited : false;
+
+  // Check if user can use a specific feature
+  const canUseFeature = useCallback((feature: 'match' | 'randomize'): boolean => {
+    if (!usage) return false;
+    if (usage.unlimited) return true;
+    
+    return feature === 'match' ? usage.can_match : usage.can_randomize;
+  }, [usage]);
+
+  // Fetch current usage status
+  const checkUsage = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const usageData = await FaceSwapAPI.getUsageStatus();
+      setUsage(usageData);
+    } catch (err) {
+      console.error('Failed to check usage:', err);
+      setError(err instanceof Error ? err.message : 'Failed to check usage');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Handle usage limit errors from API calls
+  const handleUsageLimitError = useCallback((error: UsageLimitError) => {
+    console.log('Usage limit reached:', error);
+    if (error.usage) {
+      setUsage(error.usage);
+    }
+    setError(error.message || 'Usage limit reached');
+  }, []);
+
+  // Reset usage state (for testing or after login)
+  const resetUsage = useCallback(() => {
+    setUsage(null);
+    setError(null);
+    checkUsage();
+  }, [checkUsage]);
+
+  // Load usage on mount
+  useEffect(() => {
+    checkUsage();
+  }, [checkUsage]);
+
+  return {
+    usage,
+    loading,
+    error,
+    isLimited,
+    canUseFeature,
+    checkUsage,
+    handleUsageLimitError,
+    resetUsage,
+  };
+};
+
 
 
 # ==== src/services/api.ts ====
 
 import axios from 'axios';
-import type { FaceSwapResult, ApiError } from '../types/index';
+import type { FaceSwapResult, ApiError, UsageData, UsageLimitError } from '../types/index';
 
-// Read from environment variables (from Netlify environment variables)
+// Read from environment variables
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8002';
-const API_TOKEN = import.meta.env.VITE_API_TOKEN;
 
-// Debug environment variables
 console.log('🔧 Environment check:');
 console.log('  - API_BASE_URL:', API_BASE_URL);
-console.log('  - NODE_ENV:', import.meta.env.MODE);
-console.log('  - API_TOKEN present:', !!API_TOKEN);
-
-// Debug: Check if token is loaded
-if (!API_TOKEN) {
-  console.error('❌ API Token not found! Make sure environment variables are set with VITE_API_TOKEN');
-} else {
-  console.log('✅ API Token loaded:', API_TOKEN.substring(0, 8) + '...');
-}
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Authorization': API_TOKEN ? `Token ${API_TOKEN}` : '',
-  },
-  timeout: 300000, // 5 minutes for face swap processing
-});
-
-// Add request interceptor for debugging
-api.interceptors.request.use((config) => {
-  console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
-  return config;
+  timeout: 300000,
+  withCredentials: true, // Include cookies for session management
 });
 
 // Add response interceptor for error handling
 api.interceptors.response.use(
-  (response) => {
-    console.log(`✅ API Response: ${response.status} ${response.config.baseURL}${response.config.url}`);
-    return response;
-  },
+  (response) => response,
   (error) => {
-    console.error(`❌ API Error: ${error.response?.status} ${error.config?.baseURL}${error.config?.url}`, error.response?.data);
+    console.error(`❌ API Error: ${error.response?.status}`, error.response?.data);
     return Promise.reject(error);
   }
 );
@@ -101,21 +186,12 @@ export class FaceSwapAPI {
     selfieFile: File,
     onProgress?: (progress: number) => void
   ): Promise<FaceSwapResult> {
-    if (!API_TOKEN) {
-      throw new Error('API token not configured. Please set VITE_API_TOKEN in environment variables.');
-    }
-
     const formData = new FormData();
     formData.append('selfie', selfieFile);
 
     try {
-      console.log(`📤 Uploading file: ${selfieFile.name} (${(selfieFile.size / 1024 / 1024).toFixed(1)}MB)`);
-      
-      // 🔥 FIXED: Use correct endpoint path without double /api/
       const response = await api.post<FaceSwapResult>('/api/imagegen/generate/', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total && onProgress) {
             const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -123,80 +199,84 @@ export class FaceSwapAPI {
           }
         },
       });
-
-      console.log('✅ Face swap successful:', response.data);
       return response.data;
     } catch (error) {
-      console.error('❌ Face swap failed:', error);
-      
-      if (axios.isAxiosError(error)) {
-        console.error('❌ Axios error details:', {
-          message: error.message,
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          url: error.config?.url,
-          method: error.config?.method
-        });
+      throw this.handleApiError(error);
+    }
+  }
 
-        if (error.code === 'ECONNREFUSED') {
-          throw new Error('Cannot connect to server. Make sure the backend is running.');
-        }
-        
-        if (error.code === 'ERR_NETWORK') {
-          throw new Error('Network error - check CORS settings and backend connectivity.');
-        }
-        
-        if (error.response?.status === 401) {
-          throw new Error('Authentication failed. Check your API token in environment variables.');
-        }
-        
-        if (error.response?.status === 404) {
-          throw new Error('API endpoint not found. Check the backend URL configuration.');
-        }
-        
-        if (error.response?.status === 413) {
-          throw new Error('File too large. Please use an image under 10MB.');
-        }
-        
-        if (error.response?.data) {
-          const apiError = error.response.data as ApiError;
-          throw new Error(apiError.error || `Server error: ${error.response.status}`);
-        }
-      }
-      
-      throw new Error('Network error. Please check your connection and try again.');
+  static async randomizeFaceSwap(
+    selfieFile: File,
+    onProgress?: (progress: number) => void
+  ): Promise<FaceSwapResult> {
+    const formData = new FormData();
+    formData.append('selfie', selfieFile);
+
+    try {
+      const response = await api.post<FaceSwapResult>('/api/imagegen/randomize/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(progress);
+          }
+        },
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  static async getUsageStatus(): Promise<UsageData> {
+    try {
+      const response = await api.get<UsageData>('/api/imagegen/usage/');
+      return response.data;
+    } catch (error) {
+      throw new Error('Failed to check usage status');
     }
   }
 
   static async getImageStatus(id: number): Promise<FaceSwapResult> {
     try {
-      // 🔥 FIXED: Use correct endpoint path without double /api/
       const response = await api.get<FaceSwapResult>(`/api/imagegen/status/${id}/`);
       return response.data;
     } catch (error) {
-      console.error('❌ Status check failed:', error);
       throw new Error('Failed to check image status');
     }
   }
 
   static async testConnection(): Promise<boolean> {
     try {
-      // Test the health endpoint first
-      const response = await api.get('/health/');
-      console.log('✅ Health check passed:', response.data);
+      await api.get('/health/');
       return true;
     } catch (error) {
-      console.error('❌ Connection test failed:', error);
-      // Try the root endpoint as fallback
-      try {
-        const response = await api.get('/');
-        console.log('✅ Root endpoint accessible:', response.data);
-        return true;
-      } catch (rootError) {
-        console.error('❌ Root endpoint also failed:', rootError);
-        return false;
+      return false;
+    }
+  }
+
+  private static handleApiError(error: unknown): Error {
+    if (axios.isAxiosError(error)) {
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Cannot connect to server. Make sure the backend is running.');
+      }
+      
+      if (error.response?.status === 429) {
+        const errorData = error.response.data as UsageLimitError;
+        const usageLimitError = new Error(errorData.message || 'Usage limit reached') as Error & UsageLimitError;
+        usageLimitError.usage = errorData.usage;
+        usageLimitError.registration_required = errorData.registration_required;
+        usageLimitError.feature_type = errorData.feature_type;
+        throw usageLimitError;
+      }
+      
+      if (error.response?.data) {
+        const apiError = error.response.data as ApiError;
+        throw new Error(apiError.error || `Server error: ${error.response.status}`);
       }
     }
+    
+    throw new Error('Network error. Please check your connection and try again.');
   }
 }
 
@@ -501,8 +581,11 @@ import { Sparkles, AlertCircle, History } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultDisplay from './components/ResultDisplay';
+import RandomizeButton from './components/RandomizeButton';
+import RegistrationGate from './components/RegistrationGate';
 import { FaceSwapAPI } from './services/api';
-import type { FaceSwapResult, ProgressStep } from './types/index';
+import { useUsage } from './hooks/useUsage';
+import type { FaceSwapResult, ProgressStep, UsageLimitError } from './types/index';
 
 type AppState = 'upload' | 'processing' | 'result' | 'error';
 
@@ -511,12 +594,18 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [result, setResult] = useState<FaceSwapResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showRegistrationGate, setShowRegistrationGate] = useState(false);
+  const [lastFeatureAttempted, setLastFeatureAttempted] = useState<'match' | 'randomize' | undefined>();
+  
   const [processing, setProcessing] = useState({
     step: 'uploading' as ProgressStep,
     progress: 0,
     message: 'Preparing your transformation...',
     matchedFigure: undefined as string | undefined,
   });
+
+  // Usage tracking hook
+  const { usage, loading: usageLoading, canUseFeature, handleUsageLimitError, checkUsage } = useUsage();
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
@@ -528,8 +617,16 @@ function App() {
     setError(null);
   };
 
-  const handleStartProcessing = async () => {
+  const handleStartProcessing = async (isRandomize = false) => {
     if (!selectedFile) return;
+
+    // Check if user can use this feature
+    const featureType = isRandomize ? 'randomize' : 'match';
+    if (!canUseFeature(featureType)) {
+      setLastFeatureAttempted(featureType);
+      setShowRegistrationGate(true);
+      return;
+    }
 
     setState('processing');
     setError(null);
@@ -544,27 +641,43 @@ function App() {
       updateProgress('uploading', 10, 'Uploading your selfie securely...');
       
       // Step 2: Start the API call
-      updateProgress('analyzing', 25, 'AI is analyzing your facial features...');
+      const analysisMessage = isRandomize 
+        ? 'AI is preparing a random transformation...' 
+        : 'AI is analyzing your facial features...';
+      updateProgress('analyzing', 25, analysisMessage);
       
-      const apiPromise = FaceSwapAPI.generateFaceSwap(selectedFile, (uploadProgress) => {
-        updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
-      });
+      const apiPromise = isRandomize
+        ? FaceSwapAPI.randomizeFaceSwap(selectedFile, (uploadProgress) => {
+            updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
+          })
+        : FaceSwapAPI.generateFaceSwap(selectedFile, (uploadProgress) => {
+            updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
+          });
       
       // Simulate analysis step
       setTimeout(() => {
-        updateProgress('analyzing', 45, 'Identifying unique facial characteristics...');
+        const progressMessage = isRandomize 
+          ? 'Spinning the wheel of history...' 
+          : 'Identifying unique facial characteristics...';
+        updateProgress('analyzing', 45, progressMessage);
       }, 1000);
       
       // Simulate matching step
       setTimeout(() => {
-        updateProgress('matching', 65, 'Searching through historical figures...');
+        const matchingMessage = isRandomize 
+          ? 'Selecting your random historical twin...' 
+          : 'Searching through historical figures...';
+        updateProgress('matching', 65, matchingMessage);
       }, 2500);
       
       // Wait for API response
       const apiResult = await apiPromise;
       
       // Step 3: Show match found
-      updateProgress('matching', 80, `Perfect match found: ${apiResult.match_name}!`, apiResult.match_name);
+      const matchMessage = isRandomize 
+        ? `Random selection: ${apiResult.match_name}!` 
+        : `Perfect match found: ${apiResult.match_name}!`;
+      updateProgress('matching', 80, matchMessage, apiResult.match_name);
       
       // Step 4: Face swapping
       setTimeout(() => {
@@ -575,13 +688,33 @@ function App() {
       setTimeout(() => {
         setResult(apiResult);
         setState('result');
+        // Refresh usage data after successful operation
+        checkUsage();
       }, 2000);
       
     } catch (err) {
       console.error('Face swap error:', err);
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
-      setState('error');
+      
+      // Check if it's a usage limit error
+      if (err && typeof err === 'object' && 'usage' in err) {
+        const usageLimitError = err as UsageLimitError;
+        handleUsageLimitError(usageLimitError);
+        setLastFeatureAttempted(usageLimitError.feature_type);
+        setShowRegistrationGate(true);
+        setState('upload'); // Go back to upload state
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+        setState('error');
+      }
     }
+  };
+
+  const handleRandomize = () => {
+    handleStartProcessing(true);
+  };
+
+  const handleRegularMatch = () => {
+    handleStartProcessing(false);
   };
 
   const handleTryAgain = () => {
@@ -595,6 +728,52 @@ function App() {
       message: 'Preparing your transformation...',
       matchedFigure: undefined,
     });
+  };
+
+  const handleSignUp = () => {
+    // TODO: Implement signup functionality
+    console.log('Sign up clicked');
+    setShowRegistrationGate(false);
+  };
+
+  const handleLogin = () => {
+    // TODO: Implement login functionality  
+    console.log('Login clicked');
+    setShowRegistrationGate(false);
+  };
+
+  const renderUsageIndicator = () => {
+    if (usageLoading || !usage || usage.unlimited) return null;
+
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <h3 className="font-medium text-blue-900 mb-2">Your Free Usage</h3>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="text-center">
+            <div className={`text-lg font-bold ${usage.can_match ? 'text-green-600' : 'text-red-600'}`}>
+              {usage.matches_used}/{usage.matches_limit}
+            </div>
+            <div className="text-gray-600">Face Matches</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-lg font-bold ${usage.can_randomize ? 'text-green-600' : 'text-red-600'}`}>
+              {usage.randomizes_used}/{usage.randomizes_limit}
+            </div>
+            <div className="text-gray-600">Randomizes</div>
+          </div>
+        </div>
+        {usage.is_limited && (
+          <div className="mt-3 text-center">
+            <button
+              onClick={() => setShowRegistrationGate(true)}
+              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+            >
+              Get unlimited access →
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderContent = () => {
@@ -621,6 +800,9 @@ function App() {
               </div>
             </div>
 
+            {/* Usage Indicator */}
+            {renderUsageIndicator()}
+
             <FileUpload
               onFileSelect={handleFileSelect}
               selectedFile={selectedFile}
@@ -628,16 +810,42 @@ function App() {
             />
 
             {selectedFile && (
-              <div className="mt-8 text-center">
-                <button
-                  onClick={handleStartProcessing}
-                  className="btn-primary text-lg px-8 py-4"
-                >
-                  🔮 Find My Historical Twin
-                </button>
-                <p className="text-sm text-gray-500 mt-3">
-                  This will take about 30 seconds
-                </p>
+              <div className="mt-8 space-y-4">
+                {/* Regular Match Button */}
+                <div className="text-center">
+                  <button
+                    onClick={handleRegularMatch}
+                    disabled={!canUseFeature('match')}
+                    className={`text-lg px-8 py-4 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center gap-3 mx-auto ${
+                      canUseFeature('match')
+                        ? 'btn-primary'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <Sparkles size={20} />
+                    🔮 Find My Historical Twin
+                  </button>
+                  <p className="text-sm text-gray-500 mt-2">
+                    AI analyzes your face to find the best match
+                  </p>
+                </div>
+
+                {/* OR Divider */}
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-white text-gray-500">OR</span>
+                  </div>
+                </div>
+
+                {/* Randomize Button */}
+                <RandomizeButton
+                  onRandomize={handleRandomize}
+                  hasSelectedFile={!!selectedFile}
+                  usage={usage}
+                />
               </div>
             )}
 
@@ -736,14 +944,25 @@ function App() {
               </div>
             </div>
             
-            {state !== 'upload' && (
-              <button
-                onClick={handleTryAgain}
-                className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                ← Start Over
-              </button>
-            )}
+            <div className="flex items-center gap-4">
+              {/* Usage Summary in Header */}
+              {usage && !usage.unlimited && !usageLoading && (
+                <div className="hidden sm:flex items-center gap-3 text-sm text-gray-600">
+                  <span>Matches: {usage.matches_used}/{usage.matches_limit}</span>
+                  <span>•</span>
+                  <span>Randomizes: {usage.randomizes_used}/{usage.randomizes_limit}</span>
+                </div>
+              )}
+              
+              {state !== 'upload' && (
+                <button
+                  onClick={handleTryAgain}
+                  className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  ← Start Over
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -752,6 +971,16 @@ function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {renderContent()}
       </main>
+
+      {/* Registration Gate Modal */}
+      <RegistrationGate
+        isOpen={showRegistrationGate}
+        onClose={() => setShowRegistrationGate(false)}
+        onSignUp={handleSignUp}
+        onLogin={handleLogin}
+        usage={usage}
+        lastFeatureAttempted={lastFeatureAttempted}
+      />
 
       {/* Footer */}
       <footer className="bg-gray-50 border-t border-gray-200 mt-16">
@@ -804,6 +1033,83 @@ console.log('✅ React app mounted successfully!');
 
 
 # ==================== React Components ====================
+
+
+
+# ==== src/components/RandomizeButton.tsx ====
+
+import React from 'react';
+import { Shuffle, Lock } from 'lucide-react';
+import type { UsageData } from '../types/index';
+
+interface RandomizeButtonProps {
+  onRandomize: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  usage?: UsageData | null;
+  hasSelectedFile: boolean;
+}
+
+const RandomizeButton: React.FC<RandomizeButtonProps> = ({
+  onRandomize,
+  disabled = false,
+  loading = false,
+  usage,
+  hasSelectedFile
+}) => {
+  const canRandomize = usage ? (usage.unlimited || usage.can_randomize) : true;
+  const isDisabled = disabled || loading || !hasSelectedFile || !canRandomize;
+  
+  const getButtonText = () => {
+    if (loading) return 'Randomizing...';
+    if (!hasSelectedFile) return 'Upload Photo First';
+    if (!canRandomize && usage) {
+      return `Randomize (${usage.randomizes_used}/${usage.randomizes_limit} used)`;
+    }
+    return '🎲 Surprise Me!';
+  };
+
+  const getButtonSubtext = () => {
+    if (!hasSelectedFile) return 'Select a selfie to get started';
+    if (!canRandomize && usage) return 'Upgrade to randomize more';
+    return 'Get matched with a random historical figure';
+  };
+
+  return (
+    <div className="text-center">
+      <button
+        onClick={onRandomize}
+        disabled={isDisabled}
+        className={`
+          relative px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-200 flex items-center justify-center gap-3 mx-auto
+          ${isDisabled 
+            ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+            : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105'
+          }
+        `}
+      >
+        {!canRandomize && usage ? (
+          <Lock size={20} />
+        ) : (
+          <Shuffle size={20} className={loading ? 'animate-spin' : ''} />
+        )}
+        {getButtonText()}
+      </button>
+      
+      <p className={`text-sm mt-2 ${!canRandomize && usage ? 'text-red-600' : 'text-gray-600'}`}>
+        {getButtonSubtext()}
+      </p>
+      
+      {usage && !usage.unlimited && (
+        <div className="mt-3 text-xs text-gray-500">
+          Randomizes remaining: {usage.can_randomize ? usage.randomizes_limit - usage.randomizes_used : 0}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default RandomizeButton;
 
 
 
@@ -1280,6 +1586,171 @@ const FileUpload: React.FC<FileUploadProps> = ({
 };
 
 export default FileUpload;
+
+
+
+# ==== src/components/RegistrationGate.tsx ====
+
+import React from 'react';
+import { X, Crown, Sparkles, Users, Infinity } from 'lucide-react';
+import type { UsageData } from '../types/index';
+
+interface RegistrationGateProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSignUp: () => void;
+  onLogin: () => void;
+  usage?: UsageData | null;
+  lastFeatureAttempted?: 'match' | 'randomize';
+}
+
+const RegistrationGate: React.FC<RegistrationGateProps> = ({
+  isOpen,
+  onClose,
+  onSignUp,
+  onLogin,
+  usage,
+  lastFeatureAttempted
+}) => {
+  if (!isOpen) return null;
+
+  const getFeatureIcon = (feature?: string) => {
+    switch (feature) {
+      case 'match': return <Users className="w-6 h-6" />;
+      case 'randomize': return <Sparkles className="w-6 h-6" />;
+      default: return <Crown className="w-6 h-6" />;
+    }
+  };
+
+  const getFeatureName = (feature?: string) => {
+    switch (feature) {
+      case 'match': return 'face matching';
+      case 'randomize': return 'randomize feature';
+      default: return 'premium features';
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="relative bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6 rounded-t-2xl">
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 text-white hover:text-gray-200 transition-colors"
+          >
+            <X size={24} />
+          </button>
+          
+          <div className="text-center">
+            <div className="flex items-center justify-center mb-3">
+              <Crown className="w-8 h-8 text-yellow-300 mr-2" />
+              <h2 className="text-2xl font-bold">Unlock Full Access</h2>
+            </div>
+            <p className="text-blue-100">
+              You've reached your free limit! Join to continue exploring.
+            </p>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {/* Usage Status */}
+          {usage && (
+            <div className="bg-gray-50 rounded-lg p-4 mb-6">
+              <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                {getFeatureIcon(lastFeatureAttempted)}
+                Your Usage Summary
+              </h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Face Matches:</span>
+                  <span className={`font-medium ${usage.can_match ? 'text-green-600' : 'text-red-600'}`}>
+                    {usage.matches_used}/{usage.matches_limit}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Randomizes:</span>
+                  <span className={`font-medium ${usage.can_randomize ? 'text-green-600' : 'text-red-600'}`}>
+                    {usage.randomizes_used}/{usage.randomizes_limit}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Attempted Feature Message */}
+          {lastFeatureAttempted && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center gap-2 text-amber-800">
+                {getFeatureIcon(lastFeatureAttempted)}
+                <span className="font-medium">
+                  You tried to use {getFeatureName(lastFeatureAttempted)}
+                </span>
+              </div>
+              <p className="text-amber-700 text-sm mt-1">
+                Sign up now to continue and get unlimited access!
+              </p>
+            </div>
+          )}
+
+          {/* Benefits */}
+          <div className="mb-6">
+            <h3 className="font-semibold text-gray-900 mb-4 text-center">
+              ✨ What you'll get with an account:
+            </h3>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 text-gray-700">
+                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                  <Infinity className="w-4 h-4 text-green-600" />
+                </div>
+                <span>Unlimited face matching</span>
+              </div>
+              <div className="flex items-center gap-3 text-gray-700">
+                <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-purple-600" />
+                </div>
+                <span>Unlimited randomize feature</span>
+              </div>
+              <div className="flex items-center gap-3 text-gray-700">
+                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                  <Users className="w-4 h-4 text-blue-600" />
+                </div>
+                <span>Access to all historical figures</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="space-y-3">
+            <button
+              onClick={onSignUp}
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl"
+            >
+              🚀 Create Free Account
+            </button>
+            
+            <button
+              onClick={onLogin}
+              className="w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg border border-gray-300 hover:border-gray-400 transition-all duration-200"
+            >
+              Already have an account? Sign In
+            </button>
+          </div>
+
+          {/* Footer */}
+          <div className="text-center mt-6 pt-4 border-t border-gray-200">
+            <p className="text-xs text-gray-500">
+              Free to join • No credit card required • Start creating immediately
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default RegistrationGate;
 
 
 

@@ -1,4 +1,4 @@
-# imagegen/views.py - Updated with memory optimization
+# imagegen/views.py - COMPLETE FIXED VERSION
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -103,8 +103,16 @@ class GenerateImageView(APIView):
         if not selfie:
             return Response({"error": "Selfie is required"}, status=400)
 
-        # Get usage session from middleware
+        # 🔥 CRITICAL FIX: Get usage session from middleware OR create one
         usage_session = getattr(request, 'usage_session', None)
+        
+        # If no usage session from middleware, create one (fallback)
+        if not usage_session and not request.user.is_authenticated:
+            if not request.session.session_key:
+                request.session.create()
+                request.session.save()
+            usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+            print(f"🔧 Fallback: Created usage session for {request.session.session_key[:8]}...")
         
         # Compress image
         compressed_selfie = compress_image(selfie)
@@ -168,9 +176,10 @@ class GenerateImageView(APIView):
             )
             temp_image.save()
 
-            # Update usage for anonymous users
+            # 🔥 CRITICAL FIX: Update usage for anonymous users AFTER SUCCESS
             if usage_session and not request.user.is_authenticated:
-                usage_session.use_match()
+                success = usage_session.use_match()
+                print(f"📊 Usage updated - match used: {success}, new count: {usage_session.matches_used}/{usage_session.MAX_MATCHES}")
 
             return Response({
                 "id": temp_image.id,
@@ -216,7 +225,7 @@ class GenerateImageView(APIView):
 
 
 class RandomizeImageView(APIView):
-    """Randomize with random historical figure"""
+    """Randomize with random historical figure - FIXED VERSION"""
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -229,8 +238,16 @@ class RandomizeImageView(APIView):
         if not selfie:
             return Response({"error": "Selfie is required"}, status=400)
 
-        # Get usage session from middleware
+        # 🔥 CRITICAL FIX: Get usage session from middleware OR create one
         usage_session = getattr(request, 'usage_session', None)
+        
+        # If no usage session from middleware, create one (fallback)
+        if not usage_session and not request.user.is_authenticated:
+            if not request.session.session_key:
+                request.session.create()
+                request.session.save()
+            usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+            print(f"🔧 Fallback: Created usage session for {request.session.session_key[:8]}...")
         
         # Pick random figure
         random_figure = random.choice(list(HISTORICAL_FIGURES.keys()))
@@ -280,9 +297,10 @@ class RandomizeImageView(APIView):
             )
             temp_image.save()
 
-            # Update usage for anonymous users
+            # 🔥 CRITICAL FIX: Update usage for anonymous users AFTER SUCCESS
             if usage_session and not request.user.is_authenticated:
-                usage_session.use_randomize()
+                success = usage_session.use_randomize()
+                print(f"📊 Usage updated - randomize used: {success}, new count: {usage_session.randomizes_used}/{usage_session.MAX_RANDOMIZES}")
 
             return Response({
                 "id": temp_image.id,
@@ -325,17 +343,24 @@ class RandomizeImageView(APIView):
 
 
 class UsageStatusView(APIView):
-    """Get current usage status"""
+    """Get current usage status - FIXED VERSION"""
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         if request.user.is_authenticated:
             return Response({"unlimited": True, "user_authenticated": True})
         
+        # 🔥 CRITICAL FIX: Force session creation if it doesn't exist
         if not request.session.session_key:
             request.session.create()
+            request.session.save()
+            print(f"🔑 Created session in usage status: {request.session.session_key}")
+        else:
+            print(f"🔑 Using existing session: {request.session.session_key}")
             
+        # Get or create usage session
         usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        print(f"📊 Retrieved usage: matches={usage_session.matches_used}, randomizes={usage_session.randomizes_used}")
         
         return Response({
             "matches_used": usage_session.matches_used,
@@ -345,11 +370,12 @@ class UsageStatusView(APIView):
             "can_match": usage_session.can_match,
             "can_randomize": usage_session.can_randomize,
             "is_limited": usage_session.is_limited,
-            "user_authenticated": False
+            "user_authenticated": False,
+            "session_key": request.session.session_key[:8] + "...",  # For debugging
         })
 
 
-# Keep existing views
+# Keep existing views unchanged
 class ImageStatusView(APIView):
     def get(self, request, prediction_id):
         try:

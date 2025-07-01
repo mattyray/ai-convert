@@ -36,7 +36,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8002:8000"
+      - "localhost:8002:8000"  # Only bind to localhost
     environment:
       - DEBUG=True
       - DJANGO_DEBUG=True

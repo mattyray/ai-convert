@@ -405,3 +405,10 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 print(f"✅ Settings loaded - IS_CELERY: {IS_CELERY}")
+# Fix session cookies for frontend - IMPROVED
+SESSION_COOKIE_SAMESITE = 'Lax'  # Try Lax instead of None
+SESSION_COOKIE_SECURE = False    # For development (HTTP)
+SESSION_COOKIE_HTTPONLY = True   # Security
+SESSION_COOKIE_AGE = 1209600     # 2 weeks
+CSRF_COOKIE_SAMESITE = 'Lax'     # Also fix CSRF cookies
+CSRF_COOKIE_SECURE = False       # For development

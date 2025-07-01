@@ -170,8 +170,8 @@ else:
         'django.contrib.auth.middleware.AuthenticationMiddleware',
         'django.contrib.messages.middleware.MessageMiddleware',
         'django.middleware.clickjacking.XFrameOptionsMiddleware',
+        'imagegen.middleware.UsageLimitMiddleware',  # ADD THIS LINE
     ]
-    
     ROOT_URLCONF = 'django_project.urls'
 
 # Templates

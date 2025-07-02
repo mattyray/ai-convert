@@ -1,6 +1,9 @@
 import React from 'react';
 import { X, Crown, Sparkles, Users, Infinity } from 'lucide-react';
 import type { UsageData } from '../types/index';
+import SocialAuth from './SocialAuth';
+import { FaceSwapAPI } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 interface RegistrationGateProps {
   isOpen: boolean;
@@ -19,6 +22,8 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
   usage,
   lastFeatureAttempted
 }) => {
+  const { login } = useAuth();
+
   if (!isOpen) return null;
 
   const getFeatureIcon = (feature?: string) => {
@@ -35,6 +40,43 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
       case 'randomize': return 'randomize feature';
       default: return 'premium features';
     }
+  };
+
+  const handleGoogleSuccess = async (credential: string, userInfo: any) => {
+    try {
+      console.log('🔑 Google auth success:', userInfo);
+      const response = await FaceSwapAPI.googleAuth(credential, userInfo);
+      
+      login(response.token, response.user);
+      onClose();
+      alert('Welcome! You now have unlimited access to HistoryFace!');
+    } catch (error) {
+      console.error('Google auth failed:', error);
+      alert('Google authentication failed. Please try again.');
+    }
+  };
+
+  const handleFacebookSuccess = async (accessToken: string, userInfo: any) => {
+    try {
+      console.log('🔑 Facebook auth success:', userInfo);
+      const response = await FaceSwapAPI.facebookAuth(accessToken, userInfo);
+      
+      login(response.token, response.user);
+      onClose();
+      alert('Welcome! You now have unlimited access to HistoryFace!');
+    } catch (error) {
+      console.error('Facebook auth failed:', error);
+      alert('Facebook authentication failed. Please try again.');
+    }
+  };
+
+  const handleSocialAuthError = (error: string) => {
+    console.error('Social auth error:', error);
+    alert(`Authentication error: ${error}`);
+  };
+
+  const handleEmailSignup = () => {
+    alert('Email signup coming soon! For now, please use Google or Facebook.');
   };
 
   return (
@@ -128,21 +170,23 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="space-y-3">
-            <button
-              onClick={onSignUp}
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl"
-            >
-              🚀 Create Free Account
-            </button>
+          {/* Social Auth Buttons */}
+          <div className="space-y-4">
+            <SocialAuth 
+              onGoogleSuccess={handleGoogleSuccess}
+              onFacebookSuccess={handleFacebookSuccess}
+              onError={handleSocialAuthError}
+            />
             
-            <button
-              onClick={onLogin}
-              className="w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg border border-gray-300 hover:border-gray-400 transition-all duration-200"
-            >
-              Already have an account? Sign In
-            </button>
+            <div className="text-center">
+              <div className="text-sm text-gray-500 mb-2">or</div>
+              <button
+                onClick={handleEmailSignup}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                Create account with email
+              </button>
+            </div>
           </div>
 
           {/* Footer */}

@@ -7,7 +7,8 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    open: true
+    open: true,
+    https: true  // 🔥 Added HTTPS for Facebook authentication
   },
   css: {
     postcss: './postcss.config.js'

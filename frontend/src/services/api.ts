@@ -96,6 +96,91 @@ export class FaceSwapAPI {
     }
   }
 
+  // 🔥 NEW: Google Authentication
+  static async googleAuth(credential: string, userInfo: any) {
+    try {
+      console.log('🔑 Sending Google auth request...');
+      const response = await api.post('/api/accounts/auth/google/', { 
+        credential: credential,
+        user_info: userInfo
+      });
+      console.log('✅ Google auth successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Google auth failed:', error);
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Facebook Authentication
+  static async facebookAuth(accessToken: string, userInfo: any) {
+    try {
+      console.log('🔑 Sending Facebook auth request...');
+      const response = await api.post('/api/accounts/auth/facebook/', { 
+        access_token: accessToken,
+        user_info: userInfo
+      });
+      console.log('✅ Facebook auth successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Facebook auth failed:', error);
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Refresh User Session
+  static async refreshUserSession() {
+    try {
+      const response = await api.get('/api/accounts/me/');
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Email/Password Signup (for future use)
+  static async signUp(email: string, password: string, firstName?: string, lastName?: string) {
+    try {
+      const response = await api.post('/api/accounts/signup/', {
+        email,
+        password,
+        first_name: firstName || '',
+        last_name: lastName || ''
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Email/Password Login (for future use)
+  static async login(email: string, password: string) {
+    try {
+      const response = await api.post('/api/accounts/login/', {
+        email,
+        password
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Logout
+  static async logout() {
+    try {
+      await api.post('/api/accounts/logout/');
+      // Clear local storage
+      localStorage.removeItem('authToken');
+      return true;
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Clear local storage even if API call fails
+      localStorage.removeItem('authToken');
+      return false;
+    }
+  }
+
   private static handleApiError(error: unknown): Error {
     if (axios.isAxiosError(error)) {
       if (error.code === 'ECONNREFUSED') {
@@ -109,6 +194,12 @@ export class FaceSwapAPI {
         usageLimitError.registration_required = errorData.registration_required;
         usageLimitError.feature_type = errorData.feature_type;
         throw usageLimitError;
+      }
+      
+      // Handle authentication errors
+      if (error.response?.status === 401) {
+        const errorData = error.response.data as ApiError;
+        throw new Error(errorData.error || 'Authentication failed');
       }
       
       if (error.response?.data) {

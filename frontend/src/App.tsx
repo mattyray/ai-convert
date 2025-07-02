@@ -5,10 +5,12 @@ import ResultDisplay from './components/ResultDisplay';
 import RegistrationGate from './components/RegistrationGate';
 import UploadSection from './components/UploadSection';
 import ErrorDisplay from './components/ErrorDisplay';
+import UserMenu from './components/UserMenu';
 import { useUsage } from './hooks/useUsage';
 import { useFileUpload } from './hooks/useFileUpload';
 import { useProcessing } from './hooks/useProcessing';
 import { useRegistrationGate } from './hooks/useRegistrationGate';
+import { useAuth } from './hooks/useAuth';
 
 type AppState = 'upload' | 'processing' | 'result' | 'error';
 
@@ -18,6 +20,7 @@ function App() {
 
   // 🎯 Custom Hooks handle all the complexity
   const { usage, loading: usageLoading, checkUsage } = useUsage();
+  const { user, isAuthenticated, checkAuthStatus } = useAuth();
   
   const { 
     selectedFile, 
@@ -27,6 +30,14 @@ function App() {
     error: fileError 
   } = useFileUpload();
   
+  // 🔥 Updated: Enhanced registration gate callback
+  const handleUsageLimitReached = (usageLimitError: any) => {
+    // Only show registration gate if user is not authenticated
+    if (!isAuthenticated) {
+      showRegistrationGate(usageLimitError);
+    }
+  };
+  
   const {
     isProcessing,
     processing,
@@ -35,9 +46,7 @@ function App() {
     startProcessing,
     clearResult,
     clearError
-  } = useProcessing((usageLimitError) => {
-    showRegistrationGate(usageLimitError);
-  });
+  } = useProcessing(handleUsageLimitReached);
   
   const {
     isOpen: showRegistrationModal,
@@ -49,6 +58,7 @@ function App() {
     canUseFeature
   } = useRegistrationGate(() => {
     checkUsage();
+    checkAuthStatus();
   });
 
   // 🎯 Unified error handling
@@ -135,7 +145,7 @@ function App() {
         onRegularMatch={handleRegularMatch}
         onRandomize={handleRandomize}
         onShowRegistrationGate={showRegistrationGate}
-        canUseMatch={canUseFeature('match', usage)}
+        canUseMatch={isAuthenticated ? true : canUseFeature('match', usage)}
         usage={usage}
         usageLoading={usageLoading}
       />
@@ -159,12 +169,20 @@ function App() {
             </div>
             
             <div className="flex items-center gap-4">
-              {/* Usage Summary in Header */}
-              {usage && !usage.unlimited && !usageLoading && (
+              {/* Usage Summary - only show for non-authenticated users */}
+              {!isAuthenticated && usage && !usage.unlimited && !usageLoading && (
                 <div className="hidden sm:flex items-center gap-3 text-sm text-gray-600">
                   <span>Matches: {usage.matches_used}/{usage.matches_limit}</span>
                   <span>•</span>
                   <span>Randomizes: {usage.randomizes_used}/{usage.randomizes_limit}</span>
+                </div>
+              )}
+              
+              {/* Authenticated user gets unlimited indicator */}
+              {isAuthenticated && (
+                <div className="hidden sm:flex items-center gap-2 text-sm text-green-600">
+                  <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                  <span>Unlimited Access</span>
                 </div>
               )}
               
@@ -176,6 +194,29 @@ function App() {
                   ← Start Over
                 </button>
               )}
+
+              {/* User Menu */}
+              <UserMenu 
+                onShowRegistrationGate={() => showRegistrationGate({
+                  error: 'Authentication required',
+                  message: 'Sign up to unlock unlimited access',
+                  feature_type: 'match',
+                  registration_required: true,
+                  usage: usage || {
+                    matches_used: 0,
+                    matches_limit: 1,
+                    randomizes_used: 0,
+                    randomizes_limit: 1,
+                    can_match: true,
+                    can_randomize: true,
+                    is_limited: false,
+                  }
+                })}
+                onUserStateChange={() => {
+                  checkUsage();
+                  checkAuthStatus();
+                }}
+              />
             </div>
           </div>
         </div>

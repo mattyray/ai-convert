@@ -167,6 +167,8 @@ else:
         'allauth.account',
         'allauth.socialaccount',
         'allauth.socialaccount.providers.google',
+        'allauth.socialaccount.providers.facebook',  # 🔥 ADD THIS
+
 
         'imagegen',
         'corsheaders',
@@ -246,6 +248,34 @@ SOCIALACCOUNT_PROVIDERS = {
             'client_id': env('GOOGLE_CLIENT_ID', default='test-client-id'),
             'secret': env('GOOGLE_CLIENT_SECRET', default='test-secret'),
             'key': ''
+        }
+    },
+    # 🔥 ADD FACEBOOK
+    'facebook': {
+        'METHOD': 'oauth2',
+        'SCOPE': ['email', 'public_profile'],
+        'AUTH_PARAMS': {'auth_type': 'reauthenticate'},
+        'INIT_PARAMS': {'cookie': True},
+        'FIELDS': [
+            'id',
+            'email',
+            'name',
+            'first_name',
+            'last_name',
+            'verified',
+            'locale',
+            'timezone',
+            'link',
+            'gender',
+            'updated_time',
+        ],
+        'EXCHANGE_TOKEN': True,
+        'LOCALE_FUNC': 'path.to.callable',
+        'VERIFIED_EMAIL': False,
+        'VERSION': 'v13.0',
+        'APP': {
+            'client_id': env('FACEBOOK_CLIENT_ID', default='test-client-id'),
+            'secret': env('FACEBOOK_CLIENT_SECRET', default='test-secret'),
         }
     }
 }

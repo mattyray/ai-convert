@@ -3,6 +3,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from ..models import GeneratedImage, UsageSession
 from ..face_match import match_face
 from faceswap.huggingface_utils import FaceFusionClient
@@ -20,6 +22,7 @@ from ..data.historical_figures import HISTORICAL_FIGURES, get_random_figure
 MAX_CONCURRENT_JOBS = 2  # Limit simultaneous face swaps
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -145,6 +148,7 @@ class GenerateImageView(APIView):
         return None
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class RandomizeImageView(APIView):
     """Randomize with random historical figure"""
     permission_classes = [permissions.AllowAny]

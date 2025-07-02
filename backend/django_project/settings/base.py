@@ -83,6 +83,26 @@ IS_CELERY = (
     'beat' in sys.argv
 )
 
+# Disable CSRF for specific API endpoints
+CSRF_EXEMPT_URLS = [
+    r'^/api/imagegen/generate/$',
+    r'^/api/imagegen/randomize/$',
+]
+
+class DisableCSRFMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        import re
+        # Check if this URL should be exempt from CSRF
+        for pattern in CSRF_EXEMPT_URLS:
+            if re.match(pattern, request.path_info):
+                setattr(request, '_dont_enforce_csrf_checks', True)
+                print(f"🔓 CSRF exempted for: {request.path_info}")  # Debug log
+        
+        return self.get_response(request)
+
 if IS_CELERY:
     print("🔧 Celery worker detected - applying minimal configuration...")
     
@@ -161,6 +181,7 @@ else:
     # Full middleware for Django web server
     MIDDLEWARE = [
         'corsheaders.middleware.CorsMiddleware',
+        'django_project.settings.base.DisableCSRFMiddleware',  # 🔥 Add this BEFORE CsrfViewMiddleware
         'django.middleware.security.SecurityMiddleware',
         'whitenoise.middleware.WhiteNoiseMiddleware',
         'django.contrib.sessions.middleware.SessionMiddleware',
@@ -170,7 +191,7 @@ else:
         'django.contrib.auth.middleware.AuthenticationMiddleware',
         'django.contrib.messages.middleware.MessageMiddleware',
         'django.middleware.clickjacking.XFrameOptionsMiddleware',
-        'imagegen.middleware.UsageLimitMiddleware',  # ADD THIS LINE
+        'imagegen.middleware.UsageLimitMiddleware',
     ]
     ROOT_URLCONF = 'django_project.urls'
 
@@ -404,7 +425,6 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-print(f"✅ Settings loaded - IS_CELERY: {IS_CELERY}")
 # Fix session cookies for frontend - IMPROVED
 SESSION_COOKIE_SAMESITE = 'Lax'  # Try Lax instead of None
 SESSION_COOKIE_SECURE = False    # For development (HTTP)
@@ -412,3 +432,10 @@ SESSION_COOKIE_HTTPONLY = True   # Security
 SESSION_COOKIE_AGE = 1209600     # 2 weeks
 CSRF_COOKIE_SAMESITE = 'Lax'     # Also fix CSRF cookies
 CSRF_COOKIE_SECURE = False       # For development
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+print(f"✅ Settings loaded - IS_CELERY: {IS_CELERY}")

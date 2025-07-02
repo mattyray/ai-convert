@@ -47,9 +47,16 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
       console.log('🔑 Google auth success:', userInfo);
       const response = await FaceSwapAPI.googleAuth(credential, userInfo);
       
+      // 🔥 FIXED: Store token and update auth state
+      localStorage.setItem('authToken', response.token);
       login(response.token, response.user);
+      
+      // 🔥 FIXED: Close modal and show success
       onClose();
-      alert('Welcome! You now have unlimited access to HistoryFace!');
+      
+      // 🔥 FIXED: Reload page to refresh all state
+      window.location.reload();
+      
     } catch (error) {
       console.error('Google auth failed:', error);
       alert('Google authentication failed. Please try again.');
@@ -61,9 +68,16 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
       console.log('🔑 Facebook auth success:', userInfo);
       const response = await FaceSwapAPI.facebookAuth(accessToken, userInfo);
       
+      // 🔥 FIXED: Store token and update auth state
+      localStorage.setItem('authToken', response.token);
       login(response.token, response.user);
+      
+      // 🔥 FIXED: Close modal and show success
       onClose();
-      alert('Welcome! You now have unlimited access to HistoryFace!');
+      
+      // 🔥 FIXED: Reload page to refresh all state
+      window.location.reload();
+      
     } catch (error) {
       console.error('Facebook auth failed:', error);
       alert('Facebook authentication failed. Please try again.');
@@ -76,7 +90,7 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
   };
 
   const handleEmailSignup = () => {
-    alert('Email signup coming soon! For now, please use Google or Facebook.');
+    alert('Email signup coming soon! For now, please use Google.');
   };
 
   return (
@@ -97,7 +111,7 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
               <h2 className="text-2xl font-bold">Unlock Full Access</h2>
             </div>
             <p className="text-blue-100">
-              You've reached your free limit! Join to continue exploring.
+              Join to get unlimited transformations!
             </p>
           </div>
         </div>
@@ -125,21 +139,6 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
                   </span>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Attempted Feature Message */}
-          {lastFeatureAttempted && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-              <div className="flex items-center gap-2 text-amber-800">
-                {getFeatureIcon(lastFeatureAttempted)}
-                <span className="font-medium">
-                  You tried to use {getFeatureName(lastFeatureAttempted)}
-                </span>
-              </div>
-              <p className="text-amber-700 text-sm mt-1">
-                Sign up now to continue and get unlimited access!
-              </p>
             </div>
           )}
 

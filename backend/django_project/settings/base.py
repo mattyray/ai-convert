@@ -87,6 +87,8 @@ IS_CELERY = (
 CSRF_EXEMPT_URLS = [
     r'^/api/imagegen/generate/$',
     r'^/api/imagegen/randomize/$',
+    r'^/api/accounts/auth/google/$',      # 🔥 ADD THIS
+    r'^/api/accounts/auth/facebook/$',   
 ]
 
 class DisableCSRFMiddleware:

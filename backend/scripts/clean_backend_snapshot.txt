@@ -1,6 +1,6 @@
 # CLEAN BACKEND CODE SNAPSHOT
 # Essential files for HuggingFace debugging
-# Total files: 45
+# Total files: 47
 # Excludes: migrations, tests, media, large JSON files
 
 # ===== CONFIGURATION FILES =====
@@ -133,7 +133,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8002:8000"
+      - "8002:8000"  # Only bind to localhost
     environment:
       - DEBUG=True
       - DJANGO_DEBUG=True
@@ -1033,10 +1033,6 @@ from .views import (
     FaceSwapListView, 
     FaceSwapDetailView,
     FaceSwapStatusView,
-    FaceSwapTestURLView,
-    DebugGradioAPIView,
-    HuggingFaceDebugView,  # Add this import
-    TestGradioConnectionView
 )
 
 app_name = "faceswap"
@@ -1046,11 +1042,6 @@ urlpatterns = [
     path("jobs/", FaceSwapListView.as_view(), name="list"),
     path("jobs/<int:pk>/", FaceSwapDetailView.as_view(), name="detail"),
     path("status/<int:job_id>/", FaceSwapStatusView.as_view(), name="status"),
-    path("test-url/", FaceSwapTestURLView.as_view(), name="test-url"),
-    path("debug/", DebugGradioAPIView.as_view(), name="debug"),
-    path("debug-hf/", HuggingFaceDebugView.as_view(), name="debug-hf"),  # Add this line
-    path("test-gradio/", TestGradioConnectionView.as_view(), name="test-gradio"),
-
 ]
 ```
 
@@ -1065,6 +1056,7 @@ from .models import FaceSwapJob
 from .serializers import FaceSwapJobSerializer, FaceSwapCreateSerializer
 from .huggingface_utils import process_face_swap
 import threading
+
 
 class FaceSwapCreateView(generics.CreateAPIView):
     """
@@ -1093,6 +1085,7 @@ class FaceSwapCreateView(generics.CreateAPIView):
         response_serializer = FaceSwapJobSerializer(job)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
+
 class FaceSwapListView(generics.ListAPIView):
     """
     GET /api/faceswap/jobs/
@@ -1104,6 +1097,7 @@ class FaceSwapListView(generics.ListAPIView):
     def get_queryset(self):
         return FaceSwapJob.objects.filter(user=self.request.user)
 
+
 class FaceSwapDetailView(generics.RetrieveAPIView):
     """
     GET /api/faceswap/jobs/{id}/
@@ -1114,6 +1108,7 @@ class FaceSwapDetailView(generics.RetrieveAPIView):
     
     def get_queryset(self):
         return FaceSwapJob.objects.filter(user=self.request.user)
+
 
 class FaceSwapStatusView(APIView):
     """
@@ -1132,354 +1127,6 @@ class FaceSwapStatusView(APIView):
             'created_at': job.created_at,
             'completed_at': job.completed_at
         })
-
-class FaceSwapTestURLView(APIView):
-    """
-    POST /api/faceswap/test-url/
-    Test face swapping with direct URLs (for testing with Cloudinary)
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        source_url = request.data.get('source_url')
-        target_url = request.data.get('target_url')
-        
-        if not source_url or not target_url:
-            return Response({
-                'error': 'Both source_url and target_url are required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            from .huggingface_utils import FaceFusionClient
-            client = FaceFusionClient()
-            
-            # Create a simple mock object with url property
-            class MockImageField:
-                def __init__(self, url):
-                    self.url = url
-            
-            source_mock = MockImageField(source_url)
-            target_mock = MockImageField(target_url)
-            
-            # Test the face swap
-            result_data = client.swap_faces(source_mock, target_mock)
-            
-            # Return base64 encoded result for testing
-            import base64
-            result_b64 = base64.b64encode(result_data).decode('utf-8')
-            
-            return Response({
-                'status': 'success',
-                'message': 'Face swap completed successfully',
-                'result_size': len(result_data),
-                'result_preview': f"data:image/jpeg;base64,{result_b64[:100]}..."  # First 100 chars
-            })
-            
-        except Exception as e:
-            return Response({
-                'error': f'Face swap failed: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class DebugGradioAPIView(APIView):
-    """
-    Debug endpoint to test Gradio Space connectivity
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        try:
-            from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
-            from gradio_client import Client
-            import requests
-            
-            results = {}
-            
-            # Build the .hf.space URL for testing
-            space_parts = HUGGINGFACE_SPACE_NAME.split('/')
-            if len(space_parts) == 2:
-                direct_url = f"https://{space_parts[0]}-{space_parts[1]}.hf.space"
-            else:
-                direct_url = "Invalid space name format"
-            
-            results['configuration'] = {
-                'space_name': HUGGINGFACE_SPACE_NAME,
-                'direct_url': direct_url,
-                'token_configured': bool(HUGGINGFACE_API_TOKEN),
-                'token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0
-            }
-            
-            # Test 1: Check if the space is accessible
-            try:
-                response = requests.get(direct_url, timeout=10)
-                results['space_accessibility'] = {
-                    'status': f"HTTP {response.status_code}",
-                    'accessible': response.status_code == 200,
-                    'response_size': len(response.content)
-                }
-            except Exception as e:
-                results['space_accessibility'] = {
-                    'status': f"Error: {str(e)}",
-                    'accessible': False
-                }
-            
-            # Test 2: Try Gradio client connection
-            try:
-                client = Client(HUGGINGFACE_SPACE_NAME, hf_token=HUGGINGFACE_API_TOKEN)
-                api_info = client.view_api(return_format="dict")
-                results['gradio_client'] = {
-                    'connection': 'success',
-                    'api_endpoints': list(api_info.keys()) if isinstance(api_info, dict) else 'Not a dict',
-                    'endpoint_count': len(api_info) if isinstance(api_info, dict) else 0,
-                    'has_process_images': '/process_images' in str(api_info)
-                }
-            except Exception as e:
-                results['gradio_client'] = {
-                    'connection': 'failed',
-                    'error': str(e)
-                }
-                
-            return Response({
-                'space_name': HUGGINGFACE_SPACE_NAME,
-                'debug_results': results
-            })
-            
-        except Exception as e:
-            return Response({
-                'error': f'Debug failed: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class HuggingFaceDebugView(APIView):
-    """
-    Comprehensive debug endpoint to test HuggingFace Space connectivity
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        try:
-            from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
-            from gradio_client import Client
-            import requests
-            
-            results = {}
-            
-            # Build direct URL from space name
-            space_parts = HUGGINGFACE_SPACE_NAME.split('/')
-            if len(space_parts) == 2:
-                direct_url = f"https://{space_parts[0]}-{space_parts[1]}.hf.space"
-            else:
-                return Response({
-                    'error': f'Invalid space name format: {HUGGINGFACE_SPACE_NAME}. Expected: owner/space-name'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            results['configuration'] = {
-                'space_name': HUGGINGFACE_SPACE_NAME,
-                'direct_url': direct_url,
-                'token_configured': bool(HUGGINGFACE_API_TOKEN)
-            }
-            
-            # Test 1: Basic connectivity
-            try:
-                print("🔍 Testing basic connectivity...")
-                response = requests.get(direct_url, timeout=10)
-                results['basic_connectivity'] = {
-                    'status': f"HTTP {response.status_code}",
-                    'accessible': response.status_code == 200,
-                    'response_size': len(response.content)
-                }
-            except Exception as e:
-                results['basic_connectivity'] = {
-                    'status': f"Error: {str(e)}",
-                    'accessible': False
-                }
-            
-            # Test 2: Gradio Client connection
-            try:
-                print("🎭 Testing Gradio Client...")
-                client = Client(HUGGINGFACE_SPACE_NAME, hf_token=HUGGINGFACE_API_TOKEN)
-                
-                # Try to get API info
-                api_info = client.view_api(return_format="dict")
-                results['gradio_client'] = {
-                    'connection': 'success',
-                    'api_endpoints': list(api_info.keys()) if isinstance(api_info, dict) else 'Not a dict',
-                    'endpoint_count': len(api_info) if isinstance(api_info, dict) else 0
-                }
-                
-                # Check if our specific endpoint exists
-                if '/process_images' in str(api_info):
-                    results['gradio_client']['process_images_available'] = True
-                else:
-                    results['gradio_client']['process_images_available'] = False
-                    results['gradio_client']['available_endpoints'] = str(api_info)[:500]
-                
-            except Exception as e:
-                results['gradio_client'] = {
-                    'connection': 'failed',
-                    'error': str(e)
-                }
-            
-            # Test 3: Try actual FaceFusion client
-            try:
-                print("🧪 Testing FaceFusion client...")
-                from .huggingface_utils import FaceFusionClient
-                client = FaceFusionClient()
-                
-                # Test setup
-                setup_result = client.setup_facefusion()
-                results['facefusion_client'] = {
-                    'setup': 'success',
-                    'setup_result': setup_result
-                }
-                
-            except Exception as e:
-                results['facefusion_client'] = {
-                    'setup': 'failed',
-                    'error': str(e)
-                }
-            
-            # Summary and recommendations
-            recommendations = []
-            
-            if not results.get('basic_connectivity', {}).get('accessible'):
-                recommendations.append("❌ Space is not accessible - check if it's running")
-            
-            if not HUGGINGFACE_API_TOKEN:
-                recommendations.append("🔑 No API token provided - add HUGGINGFACE_API_TOKEN")
-            
-            if results.get('gradio_client', {}).get('connection') == 'failed':
-                recommendations.append("🎭 Gradio client connection failed - check space name and token")
-            
-            if not results.get('gradio_client', {}).get('process_images_available'):
-                recommendations.append("📋 process_images endpoint not found - check your Gradio app")
-            
-            if not recommendations:
-                recommendations.append("✅ All tests passed - connection should work!")
-            
-            return Response({
-                'space_name': HUGGINGFACE_SPACE_NAME,
-                'direct_url': direct_url,
-                'token_configured': bool(HUGGINGFACE_API_TOKEN),
-                'test_results': results,
-                'recommendations': recommendations
-            })
-            
-        except Exception as e:
-            return Response({
-                'error': f'Debug failed: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class TestGradioConnectionView(APIView):
-    """Enhanced test endpoint with comprehensive validation"""
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        try:
-            from django.conf import settings
-            from .huggingface_utils import (
-                FaceFusionClient, 
-                HUGGINGFACE_SPACE_NAME, 
-                HUGGINGFACE_API_TOKEN,
-                validate_huggingface_config
-            )
-            
-            # Step 1: Validate configuration
-            config_issues = validate_huggingface_config()
-            
-            # Debug environment variables
-            debug_info = {
-                'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
-                'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
-                'api_token_configured': bool(HUGGINGFACE_API_TOKEN and HUGGINGFACE_API_TOKEN != 'dummy'),
-                'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0,
-                'api_token_format_valid': HUGGINGFACE_API_TOKEN.startswith('hf_') if HUGGINGFACE_API_TOKEN else False,
-                'config_issues': config_issues
-            }
-            
-            # If there are configuration issues, return early
-            if config_issues:
-                return Response({
-                    'status': 'configuration_error',
-                    'debug_info': debug_info,
-                    'recommendations': [
-                        '🔧 Fix configuration issues before testing connection',
-                        '🔑 Ensure HUGGINGFACE_API_TOKEN is set correctly',
-                        '📝 Check HUGGINGFACE_SPACE_NAME format (owner/space-name)'
-                    ]
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Step 2: Test connection
-            client = FaceFusionClient()
-            connection_test = client.test_connection()
-            
-            if connection_test['status'] == 'success':
-                # Step 3: Try setup if connection works
-                try:
-                    setup_result = client.setup_facefusion()
-                    return Response({
-                        'status': 'success',
-                        'debug_info': debug_info,
-                        'connection_test': connection_test,
-                        'setup_result': setup_result,
-                        'message': '🎉 All tests passed! Gradio client is ready for use.',
-                        'recommendations': [
-                            '✅ Configuration is valid',
-                            '✅ Authentication successful', 
-                            '✅ API endpoints accessible',
-                            '✅ Setup completed successfully'
-                        ]
-                    })
-                except Exception as setup_error:
-                    return Response({
-                        'status': 'setup_failed',
-                        'debug_info': debug_info,
-                        'connection_test': connection_test,
-                        'setup_error': str(setup_error),
-                        'message': '⚠️ Connection works but setup failed',
-                        'recommendations': [
-                            '✅ Authentication successful',
-                            '❌ Setup failed - check if the space is running',
-                            '🔄 Try again in a few moments'
-                        ]
-                    })
-            else:
-                return Response({
-                    'status': 'connection_failed',
-                    'debug_info': debug_info,
-                    'connection_test': connection_test,
-                    'recommendations': [
-                        '❌ Connection failed',
-                        '🔑 Check if API token is valid and not expired',
-                        '🏠 Verify space name is correct',
-                        '🚀 Ensure space is running and accessible'
-                    ]
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-        except Exception as e:
-            # Make sure debug_info is available in the error case
-            debug_info = {}
-            try:
-                from django.conf import settings
-                from .huggingface_utils import HUGGINGFACE_SPACE_NAME, HUGGINGFACE_API_TOKEN
-                debug_info = {
-                    'space_name_from_settings': getattr(settings, 'HUGGINGFACE_SPACE_NAME', 'NOT_SET'),
-                    'space_name_from_utils': HUGGINGFACE_SPACE_NAME,
-                    'api_token_configured': bool(HUGGINGFACE_API_TOKEN and HUGGINGFACE_API_TOKEN != 'dummy'),
-                    'api_token_length': len(HUGGINGFACE_API_TOKEN) if HUGGINGFACE_API_TOKEN else 0,
-                    'api_token_format_valid': HUGGINGFACE_API_TOKEN.startswith('hf_') if HUGGINGFACE_API_TOKEN else False
-                }
-            except Exception:
-                pass
-                
-            return Response({
-                'status': 'error',
-                'debug_info': debug_info,
-                'error': str(e),
-                'recommendations': [
-                    '❌ Unexpected error occurred',
-                    '🔍 Check logs for more details',
-                    '⚙️ Verify all environment variables are set correctly'
-                ]
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 ```
 
 ## imagegen/tasks.py
@@ -1880,7 +1527,9 @@ urlpatterns = [
 from django.http import JsonResponse
 from django.urls import resolve
 from .models import UsageSession
+import logging
 
+logger = logging.getLogger(__name__)
 
 class UsageLimitMiddleware:
     """Track and enforce usage limits for anonymous users"""
@@ -1894,7 +1543,12 @@ class UsageLimitMiddleware:
     
     def __call__(self, request):
         # Skip for authenticated users
-        if request.user.is_authenticated or request.method != 'POST':
+        if request.user.is_authenticated:
+            logger.debug("🔐 User authenticated - skipping usage limits")
+            return self.get_response(request)
+            
+        # Only check POST requests
+        if request.method != 'POST':
             return self.get_response(request)
             
         # Check if this is a tracked endpoint
@@ -1907,32 +1561,41 @@ class UsageLimitMiddleware:
         if endpoint_name not in self.tracked_endpoints:
             return self.get_response(request)
             
-        # FORCE session creation for anonymous users
+        logger.debug(f"🎯 Processing tracked endpoint: {endpoint_name}")
+        
+        # 🔥 CRITICAL FIX: Ensure session exists BEFORE checking usage
         if not request.session.session_key:
             request.session.create()
-            request.session.save()
+            logger.debug(f"🔑 Created new session: {request.session.session_key}")
+        else:
+            logger.debug(f"🔑 Using existing session: {request.session.session_key}")
             
-        print(f"🔑 Session key: {request.session.session_key}")  # Debug
-            
-        # Get usage session
-        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
-        print(f"📊 Usage before: matches={usage_session.matches_used}, randomizes={usage_session.randomizes_used}")  # Debug
+        # FORCE session save to ensure it persists
+        request.session.save()
         
-        # Check limits
+        # Get or create usage session
+        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        logger.debug(f"📊 Usage session: matches={usage_session.matches_used}/{usage_session.MAX_MATCHES}, randomizes={usage_session.randomizes_used}/{usage_session.MAX_RANDOMIZES}")
+        
+        # Check limits BEFORE processing
         feature_type = self.tracked_endpoints[endpoint_name]
         
         if feature_type == 'match' and not usage_session.can_match:
+            logger.debug("🚫 Match limit reached")
             return self.create_limit_response('match', usage_session)
         elif feature_type == 'randomize' and not usage_session.can_randomize:
+            logger.debug("🚫 Randomize limit reached")
             return self.create_limit_response('randomize', usage_session)
             
         # Store usage session for view to use
         request.usage_session = usage_session
+        logger.debug(f"✅ Request approved - feature: {feature_type}")
+        
         return self.get_response(request)
     
     def create_limit_response(self, feature_type, usage_session):
         """Create response when user hits limit"""
-        print(f"🚫 Limit hit for {feature_type}")  # Debug
+        logger.info(f"🚫 Limit reached for {feature_type}")
         return JsonResponse({
             'error': 'Usage limit reached',
             'message': f'You have reached your limit for {feature_type}. Please sign up to continue.',
@@ -1950,100 +1613,128 @@ class UsageLimitMiddleware:
         }, status=429)
 ```
 
-## imagegen/views.py
+## imagegen/views/__init__.py
 ```python
-# imagegen/views.py - Updated with memory optimization
+from .generation_views import GenerateImageView, RandomizeImageView
+from .management_views import (
+    UsageStatusView, 
+    ImageStatusView, 
+    UnlockImageView, 
+    ListGeneratedImagesView
+)
+
+__all__ = [
+    'GenerateImageView',
+    'RandomizeImageView', 
+    'UsageStatusView',
+    'ImageStatusView',
+    'UnlockImageView',
+    'ListGeneratedImagesView'
+]
+```
+
+## imagegen/views/management_views.py
+```python
+# imagegen/views/management_views.py - Usage tracking and image management
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import permissions
+from ..models import GeneratedImage, UsageSession
+
+
+class UsageStatusView(APIView):
+    """Get current usage status"""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        if request.user.is_authenticated:
+            return Response({"unlimited": True, "user_authenticated": True})
+        
+        if not request.session.session_key:
+            request.session.create()
+            
+        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        
+        return Response({
+            "matches_used": usage_session.matches_used,
+            "matches_limit": usage_session.MAX_MATCHES,
+            "randomizes_used": usage_session.randomizes_used,
+            "randomizes_limit": usage_session.MAX_RANDOMIZES,
+            "can_match": usage_session.can_match,
+            "can_randomize": usage_session.can_randomize,
+            "is_limited": usage_session.is_limited,
+            "user_authenticated": False
+        })
+
+
+class ImageStatusView(APIView):
+    def get(self, request, prediction_id):
+        try:
+            generated_image = GeneratedImage.objects.get(id=prediction_id)
+            return Response({
+                "id": generated_image.id,
+                "status": "completed" if generated_image.output_image else "processing",
+                "match_name": generated_image.match_name,
+                "prompt": generated_image.prompt,
+                "output_image_url": generated_image.output_image.url if generated_image.output_image else None,
+                "created_at": generated_image.created_at
+            })
+        except GeneratedImage.DoesNotExist:
+            return Response({"error": "Generated image not found"}, status=404)
+
+
+class UnlockImageView(APIView):
+    def post(self, request):
+        request.session["image_generation_count"] = 0
+        return Response({"message": "Unlock granted. You can generate again."})
+
+
+class ListGeneratedImagesView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        images = GeneratedImage.objects.filter(user=request.user).order_by('-created_at')
+        results = []
+        for img in images:
+            results.append({
+                "id": img.id,
+                "match_name": img.match_name,
+                "prompt": img.prompt,
+                "output_image_url": img.output_image.url if img.output_image else None,
+                "selfie_url": img.selfie.url,
+                "created_at": img.created_at
+            })
+        return Response({"images": results})
+```
+
+## imagegen/views/generation_views.py
+```python
+# imagegen/views/generation_views.py - Core face generation functionality
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
-from .models import GeneratedImage, UsageSession
-from .face_match import match_face
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from ..models import GeneratedImage, UsageSession
+from ..face_match import match_face
 from faceswap.huggingface_utils import FaceFusionClient
 import tempfile
-import base64
 from django.core.files.base import ContentFile
 import os
 from django.core.files.uploadedfile import InMemoryUploadedFile
 import io
-import time
-import random
 from django.core.cache import cache
-from .utils import compress_image
+from ..utils import compress_image
+from ..data.historical_figures import HISTORICAL_FIGURES, get_random_figure
 
 
-# 🔥 NEW: Memory management settings
+# 🔥 Memory management settings
 MAX_CONCURRENT_JOBS = 2  # Limit simultaneous face swaps
 
-# Map historical figures to their Cloudinary URLs - UPDATED WITH 65+ FIGURES
-HISTORICAL_FIGURES = {
-    "Abraham Lincoln": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608917/Abraham_Lincoln_o5kbjh.png",
-    "Alexander the Great": "https://res.cloudinary.com/dddye9wli/image/upload/v1749854959/alexander_the_great_j5icxu.png",
-    "Andy Warhol": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608920/Andy_Warhol_p6lq5q.png",
-    "Anne Frank": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608918/Anne_Frank_flivyh.png",
-    "Audrey Hepburn": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608919/Audrey_Hepburn_rtw37d.png",
-    "Benjamin Franklin": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608919/Benjamin_Franklin_lh9vdd.png",
-    "Beyonce": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608922/Beyonce_ry9nep.png",
-    "Bill Clinton": "https://res.cloudinary.com/dddye9wli/image/upload/v1750374687/Bill_Clinton_za0jbh.png",
-    "Billie Holiday": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608922/Billie_Holiday_zpq9ks.png",
-    "Bob Dylan": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608922/Bob_Dylan_soy4se.png",
-    "Brittany Spears": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608923/Brittany_Spears_kdhdh3.png",
-    "Che Guevara": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921229/Che_Guevara_kkrtcr.png",
-    "Cher": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/cher_hhhcbg.png",
-    "Christopher Columbus": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Christopher_columbus_oewf7p.png",
-    "Cleopatra": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921359/cleopatra_zcslcx.png",
-    "Coco Chanel": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921232/Coco_Chanel_dw4bcq.png",
-    "Danny Devito": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Danny_Devito_ajkoal.png",
-    "Donald Trump": "https://res.cloudinary.com/dddye9wli/image/upload/v1750550608/Donald_Trump_yqggmn.png",
-    "Elon Musk": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608926/Elon_Musk_c3ii8i.png",
-    "Elvis": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921841/elvis_heazqa.png",
-    "Elvisnotsinging": "https://res.cloudinary.com/dddye9wli/image/upload/v1749857225/elvisnotsinging_twnnta.png",
-    "Frida Khalo": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921232/frida_khalo_gzibma.png",
-    "Genghis Khan": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608927/Genghis_Khan_ewsfvk.png",
-    "Hernan Cortes": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608930/Hernan_Cortes_lfonsp.png",
-    "JFK": "https://res.cloudinary.com/dddye9wli/image/upload/v1749856600/jfk_npw3lg.png",
-    "James Dean": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921232/james_dean_bhaaum.png",
-    "Janis Joplin": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608930/Janis_Joplin_cl5pi8.png",
-    "Jimi Hendrix": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921237/jimi_hendrix_fm56df.png",
-    "Joan of Arc": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921237/Joan_of_Arc_bysrio.png",
-    "John Lennon": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608930/John_Lennon_lod1zc.png",
-    "Josephine Baker": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608930/Josephine_Baker_spiswe.png",
-    "Judy Garland": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608931/Judy_Garland_bfbss2.png",
-    "Julius Cesear": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608931/Julius_Cesear_wampoh.png",
-    "Karl Marx": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608934/Karl_Marx_hlmk0s.png",
-    "Keith": "https://res.cloudinary.com/dddye9wli/image/upload/v1749856455/keith_o6fgff.png",
-    "King Henry Vii": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608935/King_Henry_VII_wpclza.png",
-    "Kylie Jenner": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608935/Kylie_Jenner_vwasob.png",
-    "Leonardo da Vinci": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921238/leonardo_davinci_wpggcn.png",
-    "Lucille Ball": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608935/Lucille_Ball_a5zjih.png",
-    "Madonna": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608935/Madonna_qlszs5.png",
-    "Malcolm X": "https://res.cloudinary.com/dddye9wli/image/upload/v1749854991/malcolm_x_kwlnil.png",
-    "Mao Zedong": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608935/Mao_zedong_lpvr7v.png",
-    "Marco Polo": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608937/Marco_Polo_mah3wb.png",
-    "Marie Antoinette": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921242/Marie_Antoinette_f6ndp6.png",
-    "Marilyn Manson": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608936/Marilyn_Manson_zwe6f7.png",
-    "Marilyn Monroe": "https://res.cloudinary.com/dddye9wli/image/upload/v1749858269/marilyn_monroe_zhaxku.png",
-    "Mark Zuckerberg": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608936/Mark_Zuckerberg_tvctxl.png",
-    "Mona Lisa": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608976/Mona_Lisa_cwnwdk.png",
-    "Napolean": "https://res.cloudinary.com/dddye9wli/image/upload/v1749742732/napolean_azenei.png",
-    "Oprah Winfrey": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608983/oprah_winfrey_c24nib.png",
-    "Paula Dean": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608987/Paula_Dean_lmyabz.png",
-    "Pocahontas": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921243/Pocahontas_ys39zg.png",
-    "Princess Diana": "https://res.cloudinary.com/dddye9wli/image/upload/v1749921243/princess_diana_xcvc2a.png",
-    "Queen Elizabeth I": "https://res.cloudinary.com/dddye9wli/image/upload/v1750608993/Queen_Elizabeth_I_ct6ku4.png",
-    "Queen Victoria": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609003/Queen_Victoria_jq4b9h.png",
-    "Ragnar Lothbrok": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609005/Ragnar_Lothbrok_mwwutr.png",
-    "Rasputin": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609008/Rasputin_kcpdi4.png",
-    "Richard Nixon": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609008/Richard_Nixon_qfgsnz.png",
-    "Sigourney Weaver": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609007/Sigourney_Weaver_vn70qg.png",
-    "Steve Jobs": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609007/Steve_Jobs_gluiyu.png",
-    "Susan B Anthony": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609008/Susan_B_Anthony_pgeomw.png",
-    "Vladimir Putin": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609009/Vladimir_Putin_u3k1st.png",
-    "Xi Jinping": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609010/Xi_Jinping_tiyqx2.png",
-    "Yoko Ono": "https://res.cloudinary.com/dddye9wli/image/upload/v1750609010/Yoco_ono_ttzyo1.png",
-}
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class GenerateImageView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -2169,6 +1860,7 @@ class GenerateImageView(APIView):
         return None
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class RandomizeImageView(APIView):
     """Randomize with random historical figure"""
     permission_classes = [permissions.AllowAny]
@@ -2186,9 +1878,8 @@ class RandomizeImageView(APIView):
         # Get usage session from middleware
         usage_session = getattr(request, 'usage_session', None)
         
-        # Pick random figure
-        random_figure = random.choice(list(HISTORICAL_FIGURES.keys()))
-        historical_image_url = HISTORICAL_FIGURES[random_figure]
+        # Pick random figure using the new helper function
+        random_figure, historical_image_url = get_random_figure()
         
         # Compress image
         compressed_selfie = compress_image(selfie)
@@ -2276,72 +1967,6 @@ class RandomizeImageView(APIView):
                 "is_limited": usage_session.is_limited,
             }
         return None
-
-
-class UsageStatusView(APIView):
-    """Get current usage status"""
-    permission_classes = [permissions.AllowAny]
-
-    def get(self, request):
-        if request.user.is_authenticated:
-            return Response({"unlimited": True, "user_authenticated": True})
-        
-        if not request.session.session_key:
-            request.session.create()
-            
-        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
-        
-        return Response({
-            "matches_used": usage_session.matches_used,
-            "matches_limit": usage_session.MAX_MATCHES,
-            "randomizes_used": usage_session.randomizes_used,
-            "randomizes_limit": usage_session.MAX_RANDOMIZES,
-            "can_match": usage_session.can_match,
-            "can_randomize": usage_session.can_randomize,
-            "is_limited": usage_session.is_limited,
-            "user_authenticated": False
-        })
-
-
-# Keep existing views
-class ImageStatusView(APIView):
-    def get(self, request, prediction_id):
-        try:
-            generated_image = GeneratedImage.objects.get(id=prediction_id)
-            return Response({
-                "id": generated_image.id,
-                "status": "completed" if generated_image.output_image else "processing",
-                "match_name": generated_image.match_name,
-                "prompt": generated_image.prompt,
-                "output_image_url": generated_image.output_image.url if generated_image.output_image else None,
-                "created_at": generated_image.created_at
-            })
-        except GeneratedImage.DoesNotExist:
-            return Response({"error": "Generated image not found"}, status=404)
-
-
-class UnlockImageView(APIView):
-    def post(self, request):
-        request.session["image_generation_count"] = 0
-        return Response({"message": "Unlock granted. You can generate again."})
-
-
-class ListGeneratedImagesView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get(self, request):
-        images = GeneratedImage.objects.filter(user=request.user).order_by('-created_at')
-        results = []
-        for img in images:
-            results.append({
-                "id": img.id,
-                "match_name": img.match_name,
-                "prompt": img.prompt,
-                "output_image_url": img.output_image.url if img.output_image else None,
-                "selfie_url": img.selfie.url,
-                "created_at": img.created_at
-            })
-        return Response({"images": results})
 ```
 
 ## django_project/celery_urls.py
@@ -2816,6 +2441,26 @@ IS_CELERY = (
     'beat' in sys.argv
 )
 
+# Disable CSRF for specific API endpoints
+CSRF_EXEMPT_URLS = [
+    r'^/api/imagegen/generate/$',
+    r'^/api/imagegen/randomize/$',
+]
+
+class DisableCSRFMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        import re
+        # Check if this URL should be exempt from CSRF
+        for pattern in CSRF_EXEMPT_URLS:
+            if re.match(pattern, request.path_info):
+                setattr(request, '_dont_enforce_csrf_checks', True)
+                print(f"🔓 CSRF exempted for: {request.path_info}")  # Debug log
+        
+        return self.get_response(request)
+
 if IS_CELERY:
     print("🔧 Celery worker detected - applying minimal configuration...")
     
@@ -2894,6 +2539,7 @@ else:
     # Full middleware for Django web server
     MIDDLEWARE = [
         'corsheaders.middleware.CorsMiddleware',
+        'django_project.settings.base.DisableCSRFMiddleware',  # 🔥 Add this BEFORE CsrfViewMiddleware
         'django.middleware.security.SecurityMiddleware',
         'whitenoise.middleware.WhiteNoiseMiddleware',
         'django.contrib.sessions.middleware.SessionMiddleware',
@@ -2903,7 +2549,7 @@ else:
         'django.contrib.auth.middleware.AuthenticationMiddleware',
         'django.contrib.messages.middleware.MessageMiddleware',
         'django.middleware.clickjacking.XFrameOptionsMiddleware',
-        'imagegen.middleware.UsageLimitMiddleware',  # ADD THIS LINE
+        'imagegen.middleware.UsageLimitMiddleware',
     ]
     ROOT_URLCONF = 'django_project.urls'
 
@@ -3136,6 +2782,19 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 60 * 60}  # Task expires in 1 hour if not picked up
     },
 }
+
+# Fix session cookies for frontend - IMPROVED
+SESSION_COOKIE_SAMESITE = 'Lax'  # Try Lax instead of None
+SESSION_COOKIE_SECURE = False    # For development (HTTP)
+SESSION_COOKIE_HTTPONLY = True   # Security
+SESSION_COOKIE_AGE = 1209600     # 2 weeks
+CSRF_COOKIE_SAMESITE = 'Lax'     # Also fix CSRF cookies
+CSRF_COOKIE_SECURE = False       # For development
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 print(f"✅ Settings loaded - IS_CELERY: {IS_CELERY}")
 ```

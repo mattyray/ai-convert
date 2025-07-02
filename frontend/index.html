@@ -6,22 +6,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HistoryFace</title>
     
-    <!-- Google Identity Services -->
+    <!-- 🔥 FIXED: Google Identity Services -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     
-    <!-- Facebook SDK -->
+    <!-- 🔥 FIXED: Facebook SDK with HTTPS check -->
     <script>
       window.fbAsyncInit = function() {
         FB.init({
-          appId: '1430950704695809', // Replace with your actual Facebook App ID
+          appId: '1430950704695809',
           cookie: true,
           xfbml: true,
           version: 'v18.0'
         });
+        window.fbReady = true;
+        console.log('✅ Facebook SDK initialized');
       };
-    </script>
-    <script async defer crossorigin="anonymous" 
-            src="https://connect.facebook.net/en_US/sdk.js">
+
+      // Only load FB SDK if we're on HTTPS or localhost
+      (function(d, s, id) {
+        var js, fjs = d.getElementsByTagName(s)[0];
+        if (d.getElementById(id)) return;
+        js = d.createElement(s); 
+        js.id = id;
+        
+        const isSecure = location.protocol === 'https:' || location.hostname === 'localhost';
+        if (isSecure) {
+          js.src = "https://connect.facebook.net/en_US/sdk.js";
+          fjs.parentNode.insertBefore(js, fjs);
+        } else {
+          console.log('⚠️ Facebook SDK skipped - requires HTTPS');
+          window.fbSkipped = true;
+        }
+      }(document, 'script', 'facebook-jssdk'));
     </script>
   </head>
   <body>

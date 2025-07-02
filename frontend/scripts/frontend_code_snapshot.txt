@@ -1,6 +1,6 @@
 # FRONTEND CODE SNAPSHOT
 # Generated for AI Face Swap App
-# Total files: 37
+# Total files: 40
 
 
 
@@ -218,6 +218,104 @@ export const useFileUpload = (): UseFileUploadReturn => {
     handleFileSelect,
     handleClearFile,
     error,
+  };
+};
+
+
+
+# ==== src/hooks/useAuth.ts ====
+
+// src/hooks/useAuth.ts
+import { useState, useEffect, useCallback } from 'react';
+import { FaceSwapAPI } from '../services/api';
+
+interface User {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+interface UseAuthReturn {
+  user: User | null;
+  isAuthenticated: boolean;
+  loading: boolean;
+  error: string | null;
+  login: (token: string, userData: User) => void;
+  logout: () => Promise<void>;
+  checkAuthStatus: () => Promise<void>;
+  clearError: () => void;
+}
+
+export const useAuth = (): UseAuthReturn => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const checkAuthStatus = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setUser(null);
+        return;
+      }
+
+      // Verify token is still valid by getting user info
+      const userData = await FaceSwapAPI.refreshUserSession();
+      setUser(userData);
+    } catch (err) {
+      console.log('Auth check failed:', err);
+      // Clear invalid token
+      localStorage.removeItem('authToken');
+      setUser(null);
+      setError(err instanceof Error ? err.message : 'Authentication failed');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const login = useCallback((token: string, userData: User) => {
+    localStorage.setItem('authToken', token);
+    setUser(userData);
+    setError(null);
+    console.log('✅ User logged in:', userData.email);
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await FaceSwapAPI.logout();
+    } catch (err) {
+      console.error('Logout API call failed:', err);
+      // Continue with logout even if API call fails
+    } finally {
+      localStorage.removeItem('authToken');
+      setUser(null);
+      setError(null);
+      console.log('✅ User logged out');
+    }
+  }, []);
+
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
+  // Check auth status on mount
+  useEffect(() => {
+    checkAuthStatus();
+  }, [checkAuthStatus]);
+
+  return {
+    user,
+    isAuthenticated: !!user,
+    loading,
+    error,
+    login,
+    logout,
+    checkAuthStatus,
+    clearError,
   };
 };
 
@@ -601,6 +699,91 @@ export class FaceSwapAPI {
     }
   }
 
+  // 🔥 NEW: Google Authentication
+  static async googleAuth(credential: string, userInfo: any) {
+    try {
+      console.log('🔑 Sending Google auth request...');
+      const response = await api.post('/api/accounts/auth/google/', { 
+        credential: credential,
+        user_info: userInfo
+      });
+      console.log('✅ Google auth successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Google auth failed:', error);
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Facebook Authentication
+  static async facebookAuth(accessToken: string, userInfo: any) {
+    try {
+      console.log('🔑 Sending Facebook auth request...');
+      const response = await api.post('/api/accounts/auth/facebook/', { 
+        access_token: accessToken,
+        user_info: userInfo
+      });
+      console.log('✅ Facebook auth successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Facebook auth failed:', error);
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Refresh User Session
+  static async refreshUserSession() {
+    try {
+      const response = await api.get('/api/accounts/me/');
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Email/Password Signup (for future use)
+  static async signUp(email: string, password: string, firstName?: string, lastName?: string) {
+    try {
+      const response = await api.post('/api/accounts/signup/', {
+        email,
+        password,
+        first_name: firstName || '',
+        last_name: lastName || ''
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Email/Password Login (for future use)
+  static async login(email: string, password: string) {
+    try {
+      const response = await api.post('/api/accounts/login/', {
+        email,
+        password
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Logout
+  static async logout() {
+    try {
+      await api.post('/api/accounts/logout/');
+      // Clear local storage
+      localStorage.removeItem('authToken');
+      return true;
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Clear local storage even if API call fails
+      localStorage.removeItem('authToken');
+      return false;
+    }
+  }
+
   private static handleApiError(error: unknown): Error {
     if (axios.isAxiosError(error)) {
       if (error.code === 'ECONNREFUSED') {
@@ -614,6 +797,12 @@ export class FaceSwapAPI {
         usageLimitError.registration_required = errorData.registration_required;
         usageLimitError.feature_type = errorData.feature_type;
         throw usageLimitError;
+      }
+      
+      // Handle authentication errors
+      if (error.response?.status === 401) {
+        const errorData = error.response.data as ApiError;
+        throw new Error(errorData.error || 'Authentication failed');
       }
       
       if (error.response?.data) {
@@ -929,10 +1118,12 @@ import ResultDisplay from './components/ResultDisplay';
 import RegistrationGate from './components/RegistrationGate';
 import UploadSection from './components/UploadSection';
 import ErrorDisplay from './components/ErrorDisplay';
+import UserMenu from './components/UserMenu';
 import { useUsage } from './hooks/useUsage';
 import { useFileUpload } from './hooks/useFileUpload';
 import { useProcessing } from './hooks/useProcessing';
 import { useRegistrationGate } from './hooks/useRegistrationGate';
+import { useAuth } from './hooks/useAuth';
 
 type AppState = 'upload' | 'processing' | 'result' | 'error';
 
@@ -942,6 +1133,7 @@ function App() {
 
   // 🎯 Custom Hooks handle all the complexity
   const { usage, loading: usageLoading, checkUsage } = useUsage();
+  const { user, isAuthenticated, checkAuthStatus } = useAuth();
   
   const { 
     selectedFile, 
@@ -951,6 +1143,14 @@ function App() {
     error: fileError 
   } = useFileUpload();
   
+  // 🔥 Updated: Enhanced registration gate callback
+  const handleUsageLimitReached = (usageLimitError: any) => {
+    // Only show registration gate if user is not authenticated
+    if (!isAuthenticated) {
+      showRegistrationGate(usageLimitError);
+    }
+  };
+  
   const {
     isProcessing,
     processing,
@@ -959,9 +1159,7 @@ function App() {
     startProcessing,
     clearResult,
     clearError
-  } = useProcessing((usageLimitError) => {
-    showRegistrationGate(usageLimitError);
-  });
+  } = useProcessing(handleUsageLimitReached);
   
   const {
     isOpen: showRegistrationModal,
@@ -973,6 +1171,7 @@ function App() {
     canUseFeature
   } = useRegistrationGate(() => {
     checkUsage();
+    checkAuthStatus();
   });
 
   // 🎯 Unified error handling
@@ -1059,7 +1258,7 @@ function App() {
         onRegularMatch={handleRegularMatch}
         onRandomize={handleRandomize}
         onShowRegistrationGate={showRegistrationGate}
-        canUseMatch={canUseFeature('match', usage)}
+        canUseMatch={isAuthenticated ? true : canUseFeature('match', usage)}
         usage={usage}
         usageLoading={usageLoading}
       />
@@ -1083,12 +1282,20 @@ function App() {
             </div>
             
             <div className="flex items-center gap-4">
-              {/* Usage Summary in Header */}
-              {usage && !usage.unlimited && !usageLoading && (
+              {/* Usage Summary - only show for non-authenticated users */}
+              {!isAuthenticated && usage && !usage.unlimited && !usageLoading && (
                 <div className="hidden sm:flex items-center gap-3 text-sm text-gray-600">
                   <span>Matches: {usage.matches_used}/{usage.matches_limit}</span>
                   <span>•</span>
                   <span>Randomizes: {usage.randomizes_used}/{usage.randomizes_limit}</span>
+                </div>
+              )}
+              
+              {/* Authenticated user gets unlimited indicator */}
+              {isAuthenticated && (
+                <div className="hidden sm:flex items-center gap-2 text-sm text-green-600">
+                  <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                  <span>Unlimited Access</span>
                 </div>
               )}
               
@@ -1100,6 +1307,29 @@ function App() {
                   ← Start Over
                 </button>
               )}
+
+              {/* User Menu */}
+              <UserMenu 
+                onShowRegistrationGate={() => showRegistrationGate({
+                  error: 'Authentication required',
+                  message: 'Sign up to unlock unlimited access',
+                  feature_type: 'match',
+                  registration_required: true,
+                  usage: usage || {
+                    matches_used: 0,
+                    matches_limit: 1,
+                    randomizes_used: 0,
+                    randomizes_limit: 1,
+                    can_match: true,
+                    can_randomize: true,
+                    is_limited: false,
+                  }
+                })}
+                onUserStateChange={() => {
+                  checkUsage();
+                  checkAuthStatus();
+                }}
+              />
             </div>
           </div>
         </div>
@@ -1248,6 +1478,211 @@ const RandomizeButton: React.FC<RandomizeButtonProps> = ({
 };
 
 export default RandomizeButton;
+
+
+
+# ==== src/components/UserMenu.tsx ====
+
+// src/components/UserMenu.tsx
+import React, { useState, useRef, useEffect } from 'react';
+import { User, LogOut, Settings, History, ChevronDown } from 'lucide-react';
+import { FaceSwapAPI } from '../services/api';
+
+interface UserData {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+interface UserMenuProps {
+  onShowRegistrationGate: () => void;
+  onUserStateChange?: () => void;
+}
+
+const UserMenu: React.FC<UserMenuProps> = ({ onShowRegistrationGate, onUserStateChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [user, setUser] = useState<UserData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Check authentication status on mount
+  useEffect(() => {
+    checkAuthStatus();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      // Try to get user info to verify token is valid
+      const userData = await FaceSwapAPI.refreshUserSession();
+      setUser(userData);
+    } catch (error) {
+      console.log('User not authenticated:', error);
+      // Clear invalid token
+      localStorage.removeItem('authToken');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignIn = () => {
+    onShowRegistrationGate();
+    setIsOpen(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await FaceSwapAPI.logout();
+      setUser(null);
+      setIsOpen(false);
+      
+      // Notify parent about user state change
+      if (onUserStateChange) {
+        onUserStateChange();
+      }
+      
+      // Refresh page to reset any cached user data
+      window.location.reload();
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Force logout even if API call fails
+      localStorage.removeItem('authToken');
+      setUser(null);
+      window.location.reload();
+    }
+  };
+
+  const getUserInitials = (user: UserData): string => {
+    const first = user.first_name?.charAt(0) || '';
+    const last = user.last_name?.charAt(0) || '';
+    return (first + last).toUpperCase() || user.email?.charAt(0).toUpperCase() || '?';
+  };
+
+  const getUserDisplayName = (user: UserData): string => {
+    if (user.first_name && user.last_name) {
+      return `${user.first_name} ${user.last_name}`;
+    }
+    if (user.first_name) {
+      return user.first_name;
+    }
+    return user.email;
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
+    );
+  }
+
+  // Logged out state
+  if (!user) {
+    return (
+      <button
+        onClick={handleSignIn}
+        className="bg-white hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg border border-gray-300 hover:border-gray-400 transition-all duration-200 text-sm"
+      >
+        Sign In
+      </button>
+    );
+  }
+
+  // Logged in state
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {/* User Avatar Button */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100 transition-colors"
+      >
+        <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+          {getUserInitials(user)}
+        </div>
+        <ChevronDown 
+          size={16} 
+          className={`text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} 
+        />
+      </button>
+
+      {/* Dropdown Menu */}
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
+          {/* User Info */}
+          <div className="px-4 py-3 border-b border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                {getUserInitials(user)}
+              </div>
+              <div>
+                <div className="font-medium text-gray-900">{getUserDisplayName(user)}</div>
+                <div className="text-sm text-gray-500">{user.email}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Menu Items */}
+          <div className="py-1">
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                // TODO: Navigate to account settings
+                alert('Account settings coming soon!');
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+            >
+              <Settings size={16} />
+              Account Settings
+            </button>
+            
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                // TODO: Navigate to transformation history
+                alert('Transformation history coming soon!');
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+            >
+              <History size={16} />
+              My Transformations
+            </button>
+          </div>
+
+          {/* Logout */}
+          <div className="border-t border-gray-100 py-1">
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+            >
+              <LogOut size={16} />
+              Sign Out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default UserMenu;
 
 
 
@@ -1855,11 +2290,129 @@ export default FileUpload;
 
 
 
+# ==== src/components/SocialAuth.tsx ====
+
+import React, { useEffect } from 'react';
+
+// Extend Window interface for TypeScript
+declare global {
+  interface Window {
+    google: any;
+    FB: any;
+  }
+}
+
+interface SocialAuthProps {
+  onGoogleSuccess: (token: string, userInfo: any) => void;
+  onFacebookSuccess: (token: string, userInfo: any) => void;
+  onError: (error: string) => void;
+}
+
+const SocialAuth: React.FC<SocialAuthProps> = ({ 
+  onGoogleSuccess, 
+  onFacebookSuccess, 
+  onError 
+}) => {
+  
+  // Initialize Google OAuth when component mounts
+  useEffect(() => {
+    if (window.google) {
+      window.google.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        callback: handleGoogleResponse,
+      });
+    }
+  }, []);
+
+  const handleGoogleResponse = async (response: any) => {
+    try {
+      // The response contains a JWT token, we need to decode it
+      const credential = response.credential;
+      
+      // Parse the JWT to get user info (basic decode - in production use a proper JWT library)
+      const base64Url = credential.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      
+      const userInfo = JSON.parse(jsonPayload);
+      
+      // For Google Identity Services, we pass the credential token directly
+      onGoogleSuccess(credential, userInfo);
+    } catch (error) {
+      console.error('Google auth error:', error);
+      onError('Google authentication failed');
+    }
+  };
+
+  const handleGoogleLogin = () => {
+    if (window.google) {
+      window.google.accounts.id.prompt();
+    } else {
+      onError('Google SDK not loaded');
+    }
+  };
+
+  const handleFacebookLogin = () => {
+    if (window.FB) {
+      window.FB.login((response: any) => {
+        if (response.authResponse) {
+          // Get user profile information
+          window.FB.api('/me', { fields: 'name,email,first_name,last_name' }, (userInfo: any) => {
+            onFacebookSuccess(response.authResponse.accessToken, userInfo);
+          });
+        } else {
+          onError('Facebook login was cancelled or failed');
+        }
+      }, { scope: 'email,public_profile' });
+    } else {
+      onError('Facebook SDK not loaded');
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Google Login Button */}
+      <button
+        onClick={handleGoogleLogin}
+        className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg transition-colors"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        Continue with Google
+      </button>
+      
+      {/* Facebook Login Button */}
+      <button
+        onClick={handleFacebookLogin}
+        className="w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#166FE5] text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+      >
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+        </svg>
+        Continue with Facebook
+      </button>
+    </div>
+  );
+};
+
+export default SocialAuth;
+
+
+
 # ==== src/components/RegistrationGate.tsx ====
 
 import React from 'react';
 import { X, Crown, Sparkles, Users, Infinity } from 'lucide-react';
 import type { UsageData } from '../types/index';
+import SocialAuth from './SocialAuth';
+import { FaceSwapAPI } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 interface RegistrationGateProps {
   isOpen: boolean;
@@ -1878,6 +2431,8 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
   usage,
   lastFeatureAttempted
 }) => {
+  const { login } = useAuth();
+
   if (!isOpen) return null;
 
   const getFeatureIcon = (feature?: string) => {
@@ -1894,6 +2449,43 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
       case 'randomize': return 'randomize feature';
       default: return 'premium features';
     }
+  };
+
+  const handleGoogleSuccess = async (credential: string, userInfo: any) => {
+    try {
+      console.log('🔑 Google auth success:', userInfo);
+      const response = await FaceSwapAPI.googleAuth(credential, userInfo);
+      
+      login(response.token, response.user);
+      onClose();
+      alert('Welcome! You now have unlimited access to HistoryFace!');
+    } catch (error) {
+      console.error('Google auth failed:', error);
+      alert('Google authentication failed. Please try again.');
+    }
+  };
+
+  const handleFacebookSuccess = async (accessToken: string, userInfo: any) => {
+    try {
+      console.log('🔑 Facebook auth success:', userInfo);
+      const response = await FaceSwapAPI.facebookAuth(accessToken, userInfo);
+      
+      login(response.token, response.user);
+      onClose();
+      alert('Welcome! You now have unlimited access to HistoryFace!');
+    } catch (error) {
+      console.error('Facebook auth failed:', error);
+      alert('Facebook authentication failed. Please try again.');
+    }
+  };
+
+  const handleSocialAuthError = (error: string) => {
+    console.error('Social auth error:', error);
+    alert(`Authentication error: ${error}`);
+  };
+
+  const handleEmailSignup = () => {
+    alert('Email signup coming soon! For now, please use Google or Facebook.');
   };
 
   return (
@@ -1987,21 +2579,23 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="space-y-3">
-            <button
-              onClick={onSignUp}
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl"
-            >
-              🚀 Create Free Account
-            </button>
+          {/* Social Auth Buttons */}
+          <div className="space-y-4">
+            <SocialAuth 
+              onGoogleSuccess={handleGoogleSuccess}
+              onFacebookSuccess={handleFacebookSuccess}
+              onError={handleSocialAuthError}
+            />
             
-            <button
-              onClick={onLogin}
-              className="w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg border border-gray-300 hover:border-gray-400 transition-all duration-200"
-            >
-              Already have an account? Sign In
-            </button>
+            <div className="text-center">
+              <div className="text-sm text-gray-500 mb-2">or</div>
+              <button
+                onClick={handleEmailSignup}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                Create account with email
+              </button>
+            </div>
           </div>
 
           {/* Footer */}
@@ -2358,14 +2952,31 @@ code {
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
+    <title>HistoryFace</title>
+    
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    
+    <!-- Facebook SDK -->
+    <script>
+      window.fbAsyncInit = function() {
+        FB.init({
+          appId: '1430950704695809', // Replace with your actual Facebook App ID
+          cookie: true,
+          xfbml: true,
+          version: 'v18.0'
+        });
+      };
+    </script>
+    <script async defer crossorigin="anonymous" 
+            src="https://connect.facebook.net/en_US/sdk.js">
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
 
 
 

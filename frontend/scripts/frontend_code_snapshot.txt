@@ -2124,9 +2124,12 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result, onTryAgain }) => 
 
 export default ResultDisplay;
 
+  
 
 
-# ==== src/components/ErrorDisplay.tsx ====
+  
+
+# ==== src/components/ErrorDisplay.tsx ====. n
 
 import { AlertCircle } from 'lucide-react';
 

@@ -11,38 +11,36 @@ const FacebookShareButton: React.FC<FacebookShareButtonProps> = ({
   className = "" 
 }) => {
   const handleFacebookShare = () => {
-    // Create engaging share text
-    const shareText = result.is_randomized 
-      ? `🎭 I just got randomly transformed into ${result.match_name} using AI! The results are amazing! Try HistoryFace and see which historical figure you become!`
-      : `🎭 Amazing! AI matched my face with ${result.match_name} with ${(result.match_score * 100).toFixed(0)}% confidence! Try HistoryFace yourself and discover your historical twin!`;
-    
-    // Use Facebook's Feed Dialog instead of basic sharer for better control
-    const shareUrl = window.location.origin;
-    const imageUrl = result.output_image_url;
-    
-    // Facebook Feed Dialog URL with parameters
-    const facebookUrl = new URL('https://www.facebook.com/dialog/feed');
-    facebookUrl.searchParams.set('app_id', '1430950704695809'); // Your Facebook App ID
-    facebookUrl.searchParams.set('link', shareUrl);
-    facebookUrl.searchParams.set('picture', imageUrl);
-    facebookUrl.searchParams.set('name', `I transformed into ${result.match_name}!`);
-    facebookUrl.searchParams.set('caption', 'HistoryFace - AI Historical Transformation');
-    facebookUrl.searchParams.set('description', shareText);
-    facebookUrl.searchParams.set('redirect_uri', shareUrl);
-    facebookUrl.searchParams.set('display', 'popup');
-    
-    // Open in popup window
-    const popup = window.open(
-      facebookUrl.toString(),
-      'facebook-share',
-      'width=600,height=400,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no'
-    );
-    
-    if (popup) {
-      popup.focus();
+    // Check if Facebook SDK is loaded
+    if (typeof window.FB === 'undefined') {
+      console.error('Facebook SDK not loaded');
+      // Fallback to simple sharer for development
+      const shareUrl = window.location.origin;
+      const shareText = result.is_randomized 
+        ? `🎭 I just got randomly transformed into ${result.match_name} using AI! Try HistoryFace!`
+        : `🎭 Amazing! AI matched my face with ${result.match_name} with ${(result.match_score * 100).toFixed(0)}% confidence! Try HistoryFace!`;
+      
+      const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}`;
+      window.open(facebookUrl, 'facebook-share', 'width=600,height=500');
+      return;
     }
-    
-    console.log('🔗 Facebook share clicked for:', result.match_name);
+
+    // Modern FB.ui Share Dialog (2024/2025 standard)
+    window.FB.ui({
+      method: 'share',
+      href: window.location.origin, // The URL to share
+      display: 'popup'
+    }, (response: any) => {
+      if (response && !response.error_message) {
+        console.log('✅ Facebook share successful:', response);
+        // Optional: Track successful shares
+        // analytics.track('facebook_share_success', { figure: result.match_name });
+      } else {
+        console.log('❌ Facebook share cancelled or failed:', response);
+      }
+    });
+
+    console.log('🔗 Facebook share initiated for:', result.match_name);
   };
 
   return (

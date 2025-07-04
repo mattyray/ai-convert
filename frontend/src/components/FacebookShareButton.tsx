@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Share2, Copy, CheckCircle, ExternalLink } from 'lucide-react';
+import { Share2, CheckCircle } from 'lucide-react';
 import type { FaceSwapResult } from '../types/index';
 
 interface FacebookShareButtonProps {

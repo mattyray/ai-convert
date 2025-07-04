@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Share2, Copy, CheckCircle, ExternalLink } from 'lucide-react';
 import type { FaceSwapResult } from '../types/index';
 
 interface FacebookShareButtonProps {
@@ -10,115 +11,95 @@ const FacebookShareButton: React.FC<FacebookShareButtonProps> = ({
   result, 
   className = "" 
 }) => {
-  const handleFacebookShare = () => {
-    // Create engaging share text
-    const shareText = result.is_randomized 
-      ? `🎭 I just got randomly transformed into ${result.match_name} using AI! The results are amazing! Try HistoryFace and see which historical figure you become! ✨`
-      : `🎭 Amazing! AI matched my face with ${result.match_name} with ${(result.match_score * 100).toFixed(0)}% confidence! Try HistoryFace yourself and discover your historical twin! ✨`;
+  const [copyState, setCopyState] = useState<'idle' | 'copying' | 'copied'>('idle');
 
-    const shareUrl = window.location.origin;
+  const shareText = result.is_randomized 
+    ? `🎭 I just transformed into ${result.match_name} using AI! Check out HistoryFace and see which historical figure you become! ✨`
+    : `🎭 AI matched my face with ${result.match_name} (${(result.match_score * 100).toFixed(0)}% confidence)! Try HistoryFace and discover your historical twin! ✨`;
 
-    console.log('🔗 Initiating Facebook share for:', result.match_name);
+  const shareUrl = window.location.origin;
+  const fullShareText = `${shareText}\n\n🌐 Try it: ${shareUrl}\n📸 My result: ${result.output_image_url}`;
 
-    // Option 1: Try Web Share API first (works great on mobile and includes images)
+  const handleShare = async () => {
+    // 🔥 METHOD 1: Try Web Share API first (modern, works great on mobile)
     if (navigator.share) {
-      navigator.share({
-        title: `I transformed into ${result.match_name}!`,
-        text: shareText,
-        url: shareUrl
-      }).then(() => {
-        console.log('✅ Web Share API successful');
-      }).catch(err => {
-        console.log('Web Share API failed, falling back to Facebook dialog:', err);
-        openFacebookDialog();
-      });
-    } else {
-      // Desktop or browsers without Web Share API
-      openFacebookDialog();
-    }
-
-    function openFacebookDialog() {
-      // Facebook Share Dialog with pre-filled text
-      const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}`;
-      
-      console.log('🌐 Opening Facebook share dialog');
-      
-      const popup = window.open(
-        facebookUrl,
-        'facebook-share',
-        'width=600,height=500,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no'
-      );
-      
-      if (popup) {
-        popup.focus();
-        
-        // Auto-copy image URL to clipboard for easy pasting
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(result.output_image_url).then(() => {
-            console.log('📋 Image URL copied to clipboard for easy pasting');
-            
-            // Optional: Show a brief notification to user
-            showNotification();
-          }).catch(err => {
-            console.log('Clipboard copy failed:', err);
-          });
-        }
-      } else {
-        console.error('❌ Popup blocked or failed to open');
-        // Fallback: redirect to Facebook in same tab
-        window.location.href = facebookUrl;
+      try {
+        await navigator.share({
+          title: `I transformed into ${result.match_name}!`,
+          text: shareText,
+          url: shareUrl,
+        });
+        return; // Success, we're done
+      } catch (error) {
+        console.log('Web Share cancelled or failed, trying fallback');
       }
     }
 
-    function showNotification() {
-      // Create a subtle notification that the image URL is copied
-      const notification = document.createElement('div');
-      notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: #1877F2;
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        z-index: 10000;
-        font-size: 14px;
-        font-family: Arial, sans-serif;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-      `;
-      notification.textContent = '📋 Image URL copied! Paste it in your Facebook post.';
+    // 🔥 METHOD 2: Copy comprehensive text + open Facebook
+    try {
+      setCopyState('copying');
+      await navigator.clipboard.writeText(fullShareText);
+      setCopyState('copied');
       
-      document.body.appendChild(notification);
-      
-      // Animate in
+      // Open Facebook after brief delay
       setTimeout(() => {
-        notification.style.transform = 'translateX(0)';
-      }, 100);
+        const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`;
+        window.open(facebookUrl, '_blank', 'width=600,height=500');
+      }, 500);
       
-      // Remove after 4 seconds
-      setTimeout(() => {
-        notification.style.transform = 'translateX(100%)';
-        setTimeout(() => {
-          if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-          }
-        }, 300);
-      }, 4000);
+      // Reset after 3 seconds
+      setTimeout(() => setCopyState('idle'), 3000);
+      
+    } catch (error) {
+      // 🔥 METHOD 3: Fallback - just open Facebook
+      console.error('Clipboard failed, opening Facebook directly');
+      const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`;
+      window.open(facebookUrl, '_blank');
+    }
+  };
+
+  const getButtonContent = () => {
+    switch (copyState) {
+      case 'copying':
+        return (
+          <>
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            Preparing...
+          </>
+        );
+      case 'copied':
+        return (
+          <>
+            <CheckCircle size={20} />
+            Text Copied! Opening Facebook...
+          </>
+        );
+      default:
+        return (
+          <>
+            <Share2 size={20} />
+            Share to Facebook
+          </>
+        );
     }
   };
 
   return (
-    <button
-      onClick={handleFacebookShare}
-      className={`flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166FE5] text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 ${className}`}
-    >
-      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-      </svg>
-      Share to Facebook
-    </button>
+    <div className="space-y-2">
+      <button
+        onClick={handleShare}
+        disabled={copyState === 'copying'}
+        className={`flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166FE5] text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-75 disabled:hover:scale-100 ${className}`}
+      >
+        {getButtonContent()}
+      </button>
+      
+      {copyState === 'copied' && (
+        <div className="text-xs text-gray-600 text-center animate-pulse">
+          📋 Share text copied! Paste it in Facebook and add your image.
+        </div>
+      )}
+    </div>
   );
 };
 

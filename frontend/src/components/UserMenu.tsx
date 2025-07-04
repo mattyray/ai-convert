@@ -1,6 +1,6 @@
 // src/components/UserMenu.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { User, LogOut, Settings, History, ChevronDown } from 'lucide-react';
+import { LogOut, Settings, History, ChevronDown } from 'lucide-react';
 import { FaceSwapAPI } from '../services/api';
 
 interface UserData {

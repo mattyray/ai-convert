@@ -20,15 +20,14 @@ function App() {
 
   // 🎯 Custom Hooks handle all the complexity
   const { usage, loading: usageLoading, checkUsage } = useUsage();
-  const { user, isAuthenticated, checkAuthStatus } = useAuth();
+  const { isAuthenticated, checkAuthStatus } = useAuth(); // Removed unused 'user'
   
   const { 
     selectedFile, 
-    isFileSelected, 
     handleFileSelect, 
     handleClearFile, 
     error: fileError 
-  } = useFileUpload();
+  } = useFileUpload(); // Removed unused 'isFileSelected'
   
   // 🔥 Updated: Enhanced registration gate callback
   const handleUsageLimitReached = (usageLimitError: any) => {

@@ -17,8 +17,6 @@ interface RegistrationGateProps {
 const RegistrationGate: React.FC<RegistrationGateProps> = ({
   isOpen,
   onClose,
-  onSignUp,
-  onLogin,
   usage,
   lastFeatureAttempted
 }) => {
@@ -31,14 +29,6 @@ const RegistrationGate: React.FC<RegistrationGateProps> = ({
       case 'match': return <Users className="w-6 h-6" />;
       case 'randomize': return <Sparkles className="w-6 h-6" />;
       default: return <Crown className="w-6 h-6" />;
-    }
-  };
-
-  const getFeatureName = (feature?: string) => {
-    switch (feature) {
-      case 'match': return 'face matching';
-      case 'randomize': return 'randomize feature';
-      default: return 'premium features';
     }
   };
 

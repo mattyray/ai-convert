@@ -13,6 +13,22 @@ const api = axios.create({
   withCredentials: true, // Include cookies for session management
 });
 
+// 🔥 FIXED: Add request interceptor to include auth token in headers
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      config.headers.Authorization = `Token ${token}`;
+      console.log('🔑 Adding auth token to request:', config.url);
+    }
+    return config;
+  },
+  (error) => {
+    console.error('❌ Request interceptor error:', error);
+    return Promise.reject(error);
+  }
+);
+
 // Add response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,

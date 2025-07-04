@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { History } from 'lucide-react';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultDisplay from './components/ResultDisplay';
@@ -12,22 +11,17 @@ import { useProcessing } from './hooks/useProcessing';
 import { useRegistrationGate } from './hooks/useRegistrationGate';
 import { useAuth } from './hooks/useAuth';
 
-type AppState = 'upload' | 'processing' | 'result' | 'error';
-
 function App() {
-  // 🎯 Simple state for current screen
-  const [state, setState] = useState<AppState>('upload');
-
   // 🎯 Custom Hooks handle all the complexity
   const { usage, loading: usageLoading, checkUsage } = useUsage();
-  const { isAuthenticated, checkAuthStatus } = useAuth(); // Removed unused 'user'
+  const { isAuthenticated, checkAuthStatus } = useAuth();
   
   const { 
     selectedFile, 
     handleFileSelect, 
     handleClearFile, 
     error: fileError 
-  } = useFileUpload(); // Removed unused 'isFileSelected'
+  } = useFileUpload();
   
   // 🔥 Updated: Enhanced registration gate callback
   const handleUsageLimitReached = (usageLimitError: any) => {
@@ -73,22 +67,19 @@ function App() {
 
   const handleClearFileWrapper = () => {
     handleClearFile();
-    setState('upload');
     clearResult();
     clearError();
   };
 
   const handleStartProcessing = async (isRandomize = false) => {
     if (!selectedFile) return;
-
-    setState('processing');
     
     try {
       await startProcessing(selectedFile, isRandomize);
-      setState('result');
       checkUsage(); // Refresh usage after successful operation
     } catch (error) {
-      setState('error');
+      // Error handling is done in the useProcessing hook
+      console.error('Processing failed:', error);
     }
   };
 
@@ -96,11 +87,10 @@ function App() {
   const handleRandomize = () => handleStartProcessing(true);
 
   const handleTryAgain = () => {
-    setState('upload');
     handleClearFileWrapper();
   };
 
-  // 🎯 Render main content based on state
+  // 🎯 Render main content based on processing state
   const renderContent = () => {
     if (isProcessing) {
       return (

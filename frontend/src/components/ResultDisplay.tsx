@@ -229,7 +229,6 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result, onTryAgain }) => 
           Share Transformation
         </button>
 
-        {/* Facebook Share Button */}
         <FacebookShareButton 
           result={result}
           className="w-full sm:w-auto"
@@ -248,3 +247,35 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result, onTryAgain }) => 
       {downloadState === 'error' && (
         <div className="text-center">
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+            Download failed. Opening image in new tab instead...
+          </div>
+        </div>
+      )}
+
+      {/* Technical Details */}
+      <div className="bg-gray-50 rounded-xl p-6">
+        <h4 className="font-semibold text-gray-900 mb-3">Transformation Details</h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <span className="font-medium text-gray-700">Historical Match:</span>
+            <span className="ml-2 text-gray-600">{result.match_name}</span>
+          </div>
+          <div>
+            <span className="font-medium text-gray-700">Confidence Score:</span>
+            <span className="ml-2 text-gray-600">{(result.match_score * 100).toFixed(1)}%</span>
+          </div>
+          <div>
+            <span className="font-medium text-gray-700">Transformation ID:</span>
+            <span className="ml-2 text-gray-600">#{result.id}</span>
+          </div>
+          <div>
+            <span className="font-medium text-gray-700">Processing Time:</span>
+            <span className="ml-2 text-gray-600">~30 seconds</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ResultDisplay;

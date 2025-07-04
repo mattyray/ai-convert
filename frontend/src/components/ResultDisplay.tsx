@@ -1,6 +1,7 @@
 import React from 'react';
 import { Download, RefreshCw, Share2, Star } from 'lucide-react';
 import type { FaceSwapResult } from '../types/index';
+import FacebookShareButton from './FacebookShareButton';
 
 interface ResultDisplayProps {
   result: FaceSwapResult;
@@ -127,6 +128,12 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result, onTryAgain }) => 
           <Share2 size={20} />
           Share Transformation
         </button>
+
+        {/* Facebook Share Button */}
+        <FacebookShareButton 
+          result={result}
+          className="w-full sm:w-auto"
+        />
         
         <button
           onClick={onTryAgain}

@@ -11,22 +11,31 @@ const FacebookShareButton: React.FC<FacebookShareButtonProps> = ({
   className = "" 
 }) => {
   const handleFacebookShare = () => {
-    // Share the main app URL since we don't have individual transformation pages yet
-    const shareUrl = window.location.origin;
-    
     // Create engaging share text
     const shareText = result.is_randomized 
-      ? `🎭 I just got randomly transformed into ${result.match_name} using AI! Try HistoryFace and see which historical figure you become!`
+      ? `🎭 I just got randomly transformed into ${result.match_name} using AI! The results are amazing! Try HistoryFace and see which historical figure you become!`
       : `🎭 Amazing! AI matched my face with ${result.match_name} with ${(result.match_score * 100).toFixed(0)}% confidence! Try HistoryFace yourself and discover your historical twin!`;
     
-    // Create Facebook share URL
-    const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}`;
+    // Use Facebook's Feed Dialog instead of basic sharer for better control
+    const shareUrl = window.location.origin;
+    const imageUrl = result.output_image_url;
+    
+    // Facebook Feed Dialog URL with parameters
+    const facebookUrl = new URL('https://www.facebook.com/dialog/feed');
+    facebookUrl.searchParams.set('app_id', '1430950704695809'); // Your Facebook App ID
+    facebookUrl.searchParams.set('link', shareUrl);
+    facebookUrl.searchParams.set('picture', imageUrl);
+    facebookUrl.searchParams.set('name', `I transformed into ${result.match_name}!`);
+    facebookUrl.searchParams.set('caption', 'HistoryFace - AI Historical Transformation');
+    facebookUrl.searchParams.set('description', shareText);
+    facebookUrl.searchParams.set('redirect_uri', shareUrl);
+    facebookUrl.searchParams.set('display', 'popup');
     
     // Open in popup window
     const popup = window.open(
-      facebookUrl,
+      facebookUrl.toString(),
       'facebook-share',
-      'width=600,height=400,scrollbars=yes,resizable=yes'
+      'width=600,height=400,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no'
     );
     
     if (popup) {

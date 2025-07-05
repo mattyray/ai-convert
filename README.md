@@ -1,544 +1,564 @@
-# 🔄 AI Face Swap App
+# HistoryFace - AI Historical Transformation
 
-A modern, full-stack AI face swap application that allows users to upload photos and generate AI-powered face swaps using advanced machine learning models.
+Transform yourself into historical figures using cutting-edge AI face swap technology! Upload a selfie and discover which historical personality you resemble most, then see yourself transformed into iconic figures like Napoleon, Cleopatra, Leonardo da Vinci, and more.
 
-**🔗 Repository:** https://github.com/mattyray/ai-convert
+## ✨ Features
 
-## 🌟 Features
+- **🎭 AI Face Matching**: Advanced facial recognition matches you with historical figures
+- **🎲 Random Transformations**: Get surprised with random historical figure transformations  
+- **⚡ Real-time Processing**: Live progress tracking with detailed status updates
+- **🔐 Google Authentication**: Secure login with Google OAuth
+- **📱 Responsive Design**: Works seamlessly on desktop and mobile
+- **☁️ Cloud Storage**: Images stored securely with Cloudinary
+- **🚀 Background Processing**: Celery-powered async image processing
+- **📊 Processing Analytics**: Detailed logging and monitoring
 
-- **🤖 AI Face Swap**: Advanced face swapping using Hugging Face Spaces
-- **📱 Modern UI**: Responsive React frontend with Tailwind CSS
-- **🔐 Authentication**: User accounts with Google OAuth integration
-- **💳 Payments**: Stripe integration for premium features
-- **☁️ Cloud Storage**: Cloudinary for image hosting and optimization
-- **📊 Real-time Status**: Live updates on processing status
-- **🚀 Auto-scaling**: Serverless architecture with automatic scaling
-- **🐳 Containerized**: Full Docker development environment
-
-## 🏗️ Architecture
+## 🏗️ Architecture Overview
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend      │    │    Backend      │    │  AI Processing  │
+│  React Frontend │    │  Django Backend │    │  External APIs  │
 │                 │    │                 │    │                 │
-│  React + Vite   │◄──►│     Django      │◄──►│ Hugging Face    │
-│   (Netlify)     │    │    (Fly.io)     │    │    Spaces       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Cloudinary    │    │   PostgreSQL    │    │   Gradio API    │
-│ (Image Storage) │    │   (Database)    │    │ (ML Pipeline)   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+│  ┌─────────────┐│    │ ┌─────────────┐ │    │ ┌─────────────┐ │
+│  │   Upload    ││────│ │    API      │ │────│ │ HuggingFace │ │
+│  │   Component ││    │ │  Endpoints  │ │    │ │   Spaces    │ │
+│  └─────────────┘│    │ └─────────────┘ │    │ └─────────────┘ │
+│  ┌─────────────┐│    │ ┌─────────────┐ │    │ ┌─────────────┐ │
+│  │ Auth Modal  ││────│ │ User Models │ │────│ │   Google    │ │
+│  └─────────────┘│    │ └─────────────┘ │    │ │   OAuth     │ │
+│  ┌─────────────┐│    │ ┌─────────────┐ │    │ └─────────────┘ │
+│  │   Results   ││────│ │   Celery    │ │    │ ┌─────────────┐ │
+│  │   Display   ││    │ │   Workers   │ │────│ │ Cloudinary  │ │
+│  └─────────────┘│    │ └─────────────┘ │    │ │   Storage   │ │
+└─────────────────┘    └─────────────────┘    │ └─────────────┘ │
+                                              │ ┌─────────────┐ │
+                       ┌─────────────────┐    │ │   Stripe    │ │
+                       │   Data Storage  │    │ │  Payments   │ │
+                       │                 │    │ └─────────────┘ │
+                       │ ┌─────────────┐ │    └─────────────────┘
+                       │ │ PostgreSQL  │ │
+                       │ │  Database   │ │
+                       │ └─────────────┘ │
+                       │ ┌─────────────┐ │
+                       │ │    Redis    │ │
+                       │ │   Cache     │ │
+                       │ └─────────────┘ │
+                       └─────────────────┘
+```
+
+## 📋 API Flow Diagram
+
+```
+Frontend Upload → Django API → Face Recognition → HuggingFace → Result Storage
+     │              │              │                 │              │
+     │              │              │                 │              │
+     ▼              ▼              ▼                 ▼              ▼
+┌─────────┐   ┌─────────────┐  ┌──────────┐    ┌──────────┐   ┌──────────┐
+│ User    │   │ Image       │  │ Facial   │    │ AI Face  │   │ Result   │
+│ Uploads │──▶│ Validation  │─▶│ Analysis │───▶│ Swapping │──▶│ Storage  │
+│ Selfie  │   │ & Storage   │  │ & Match  │    │ Process  │   │ & Return │
+└─────────┘   └─────────────┘  └──────────┘    └──────────┘   └──────────┘
+                    │              │                 │              │
+                    ▼              ▼                 ▼              ▼
+              ┌─────────────┐  ┌──────────┐    ┌──────────┐   ┌──────────┐
+              │ Cloudinary  │  │ Database │    │ Celery   │   │ Frontend │
+              │ Image CDN   │  │ Logging  │    │ Queue    │   │ Display  │
+              └─────────────┘  └──────────┘    └──────────┘   └──────────┘
 ```
 
 ## 🛠️ Tech Stack
 
-### Frontend
-- **React 18** with TypeScript
-- **Vite** for build tooling and HMR
-- **Tailwind CSS** for utility-first styling
-- **Axios** for HTTP client with interceptors
-- **Lucide React** for consistent iconography
-
 ### Backend
-- **Django 5.1** with Python 3.10+
-- **Django REST Framework** for API endpoints
-- **PostgreSQL** for relational data storage
-- **Cloudinary** for media CDN and transformations
-- **Stripe** for payment processing
-- **Django Allauth** for social authentication
+- **Django 5.1.6** - Web framework
+- **Django REST Framework** - API development
+- **PostgreSQL** - Primary database
+- **Redis** - Caching and Celery broker
+- **Celery** - Background task processing
+- **HuggingFace Spaces** - AI face swap processing
+- **Cloudinary** - Image storage and CDN
+- **face-recognition** - Facial analysis library
 
-### AI/ML Pipeline
-- **Hugging Face Spaces** for model hosting
-- **Gradio Client** for API communication
-- **Face Recognition** libraries (dlib + face_recognition)
-- **OpenCV** for image preprocessing
+### Frontend  
+- **React 19** - UI framework
+- **TypeScript** - Type safety
+- **Vite** - Build tool and dev server
+- **Tailwind CSS** - Styling framework
+- **Axios** - HTTP client
+- **Lucide React** - Icon library
 
 ### Infrastructure
-- **Frontend**: Netlify (CDN + Static hosting)
-- **Backend**: Fly.io (Auto-scaling containers)
-- **Database**: Fly.io PostgreSQL (Managed database)
-- **Storage**: Cloudinary CDN
-- **Containerization**: Docker + Docker Compose
+- **Docker** - Containerization
+- **Fly.io** - Backend deployment
+- **Netlify** - Frontend deployment
+- **GitHub Actions** - CI/CD (planned)
 
-## 🚀 Quick Start (Docker)
+## 📁 Project Structure & Apps
+
+### Django Applications
+
+#### **🔐 accounts/**
+Custom user authentication and profile management
+```
+accounts/
+├── models.py          # CustomUser model with email-based auth
+├── views.py           # User registration, login, profile APIs
+├── serializers.py     # User data serialization
+├── social_auth.py     # Google/Facebook OAuth integration
+├── admin.py           # Django admin customization
+└── urls.py            # Authentication API endpoints
+```
+**Purpose**: Handles all user-related functionality including custom email-based authentication, social login (Google/Facebook), and user profile management.
+
+#### **🎭 faceswap/**
+Core face swapping functionality
+```
+faceswap/
+├── models.py          # FaceSwapJob model for tracking operations
+├── views.py           # Face swap API endpoints
+├── serializers.py     # Face swap request/response serialization
+├── huggingface_utils.py # HuggingFace Spaces integration
+├── admin.py           # Admin interface for job monitoring
+└── urls.py            # Face swap API routes
+```
+**Purpose**: Manages the core face swapping operations, integrating with HuggingFace Spaces for AI processing and tracking job status.
+
+#### **🖼️ imagegen/**
+Image generation and processing pipeline
+```
+imagegen/
+├── models.py          # GeneratedImage model and usage tracking
+├── views/
+│   ├── generation_views.py   # Main image processing endpoints
+│   └── management_views.py   # Image management and status
+├── serializers.py     # Image data serialization
+├── face_match.py      # Facial recognition and historical matching
+├── utils.py           # Image compression and optimization
+├── middleware.py      # Usage limit enforcement
+├── admin.py           # Admin interface for image management
+└── urls.py            # Image processing API routes
+```
+**Purpose**: Handles the complete image processing workflow from upload to historical figure matching to final result generation.
+
+#### **💬 chat/** *(Optional/Future)*
+Chat and communication features
+```
+chat/
+├── models.py          # Chat models (planned feature)
+├── views.py           # Chat API endpoints
+└── urls.py            # Chat routes
+```
+**Purpose**: Placeholder for future chat functionality, customer support, or AI chat features.
+
+### **🏢 django_project/**
+Main project configuration
+```
+django_project/
+├── settings/
+│   ├── base.py        # Base configuration
+│   ├── dev.py         # Development settings
+│   └── prod.py        # Production settings
+├── celery.py          # Celery configuration
+├── urls.py            # Main URL routing
+├── wsgi.py            # WSGI application
+└── asgi.py            # ASGI application (for future websockets)
+```
+
+## 📦 Third-Party Packages
+
+### **Core Django Packages**
+```python
+Django==5.1.6                    # Main web framework
+djangorestframework==3.16.0      # REST API framework
+django-environ==0.12.0           # Environment variable management
+django-extensions==4.1           # Useful Django extensions
+django-cors-headers==4.6.0       # CORS handling for frontend
+whitenoise==6.9.0                # Static file serving
+gunicorn==23.0.0                 # WSGI HTTP server
+```
+
+### **Authentication & Security**
+```python
+django-allauth==65.6.0           # Social authentication (Google/Facebook)
+django-crispy-forms==2.3         # Better form rendering
+crispy-bootstrap5==2024.10       # Bootstrap 5 support for forms
+cryptography==44.0.3             # Cryptographic functions
+PyJWT==2.10.1                    # JSON Web Token handling
+```
+
+### **Database & Caching**
+```python
+psycopg2-binary==2.9.10          # PostgreSQL adapter
+dj-database-url==2.1.0           # Database URL parsing
+redis==5.2.0                     # Redis client for caching
+```
+
+### **Background Tasks**
+```python
+celery==5.5.3                    # Distributed task queue
+django-celery-beat==2.8.1        # Periodic task scheduling
+django-celery-results==2.6.0     # Task result storage
+```
+
+### **Cloud Services & APIs**
+```python
+cloudinary==1.44.0               # Cloud image storage
+django-cloudinary-storage==0.3.0 # Django integration for Cloudinary
+openai==1.78.1                   # OpenAI API client
+stripe==12.0.1                   # Payment processing
+httpx==0.28.1                    # Modern HTTP client
+requests==2.32.3                 # HTTP library
+gradio-client==1.10.3            # HuggingFace Spaces client
+```
+
+### **Image Processing & AI**
+```python
+face-recognition==1.3.0          # Facial recognition library
+dlib==20.0.0                     # Machine learning toolkit
+Pillow==10.0.0                   # Python Imaging Library
+opencv-python==4.8.1.78          # Computer vision library
+numpy==2.2.4                     # Numerical computing
+```
+
+### **Authentication Services**
+```python
+google-auth==2.40.3              # Google authentication
+google-auth-oauthlib==1.2.2      # Google OAuth2 client
+google-auth-httplib2==0.2.0      # Google HTTP transport
+```
+
+### **Data Processing**
+```python
+pandas==2.2.3                    # Data manipulation (for analytics)
+openpyxl==3.1.5                  # Excel file handling
+tablib==3.8.0                    # Dataset manipulation
+python-dateutil==2.9.0.post0     # Date/time utilities
+```
+
+### **Development & Testing**
+```python
+# In requirements-dev.txt
+flake8==7.2.0                    # Code linting
+mypy==1.15.0                     # Static type checking
+pytest==8.3.5                    # Testing framework
+pytest-django==4.11.1            # Django integration for pytest
+safety==3.5.0                    # Security vulnerability scanner
+```
+
+### **System Monitoring**
+```python
+psutil==5.9.0                    # System and process utilities
+```
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- Git
-- Node.js 18+ (for local frontend development)
+- **Python 3.10+**
+- **Node.js 18+**
+- **Docker & Docker Compose**
+- **Git**
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/mattyray/ai-convert.git
-cd ai-convert
+git clone https://github.com/yourusername/historyface.git
+cd historyface
 ```
 
 ### 2. Environment Setup
 ```bash
-# Copy environment files
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
+# Backend environment
+cp .env.example .env
+# Edit .env with your configuration (see Environment Variables section)
 
-# Configure your environment variables (see Environment Variables section)
+# Frontend environment  
+cd frontend
+cp .env.example .env.local
+# Edit .env.local with your configuration
 ```
 
-### 3. Docker Development
+### 3. Start with Docker (Recommended)
 ```bash
-# Build and start all services
+# From project root
 docker-compose up --build
 
-# Or run in background
-docker-compose up -d --build
-
-# View logs
-docker-compose logs -f backend
-docker-compose logs -f frontend
+# Services will be available at:
+# - Backend: http://localhost:8002
+# - Frontend: http://localhost:5173
+# - PostgreSQL: localhost:5432
+# - Redis: localhost:6379
 ```
 
-### 4. Initialize Database
+### 4. Manual Setup (Development)
+
+#### Backend Setup
 ```bash
-# Run migrations
-docker-compose exec backend python manage.py migrate
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Create superuser (optional)
-docker-compose exec backend python manage.py createsuperuser
+# Install dependencies
+pip install -r requirements.txt
+
+# Database setup
+python manage.py migrate
+python manage.py createsuperuser
+
+# Start services
+python manage.py runserver 8002
+celery -A django_project worker --loglevel=info
+celery -A django_project beat --loglevel=info
 ```
 
-### 5. Access Application
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8002
-- **Admin Panel**: http://localhost:8002/admin
+#### Frontend Setup  
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 ## 🔧 Environment Variables
 
 ### Backend (.env)
 ```bash
-# Django Core
+# Django Settings
+DEBUG=True
 DJANGO_SECRET_KEY=your-secret-key-here
-DJANGO_DEBUG=True
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,web
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
 
 # Database
-DATABASE_URL=postgres://user:password@db:5432/ai_face_swap
+DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
 
-# Cloudinary (Image Storage)
+# Redis & Celery
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+# Cloud Storage
 CLOUDINARY_URL=cloudinary://api_key:api_secret@cloud_name
 
-# Stripe Payment Processing
-STRIPE_PUBLISHABLE_KEY=pk_test_...
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+# AI Services
+HUGGINGFACE_SPACE_NAME=your-space-name
+HUGGINGFACE_API_TOKEN=hf_your_token_here
 
-# Hugging Face AI Models
-HUGGINGFACE_SPACE_NAME=mnraynor90/facefusionfastapi-private
-HUGGINGFACE_API_TOKEN=hf_...
-
-# Google OAuth
+# Authentication
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 
-# Email Configuration
-EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=True
-EMAIL_HOST_USER=your-email@gmail.com
-EMAIL_HOST_PASSWORD=your-app-password
+# Optional: Payment & Social
+STRIPE_SECRET_KEY=sk_test_your_stripe_key
+STRIPE_PUBLISHABLE_KEY=pk_test_your_stripe_key
+FACEBOOK_CLIENT_ID=your-facebook-app-id
+FACEBOOK_CLIENT_SECRET=your-facebook-secret
 ```
 
 ### Frontend (.env.local)
 ```bash
+# API Configuration
 VITE_API_BASE_URL=http://127.0.0.1:8002
-VITE_API_TOKEN=your-api-token
+
+# Authentication
+VITE_GOOGLE_CLIENT_ID=your-google-client-id
+VITE_FACEBOOK_APP_ID=your-facebook-app-id
 ```
 
-## 🏢 Django Apps Architecture
+## 📖 Usage
 
-Our Django backend is organized into focused, single-responsibility apps:
+### 1. Upload Your Selfie
+- Drag and drop or click to select an image
+- Supports JPG, PNG, WebP formats
+- Maximum file size: 10MB
 
-### 📁 **accounts** (`accounts/`)
-**Purpose**: User management and authentication
-- **Models**: `CustomUser` with email-based authentication
-- **Features**: User registration, login, profile management
-- **Integration**: Works with Django Allauth for social login
+### 2. Choose Processing Mode
+- **🔮 Find My Historical Twin**: AI analyzes your features to find the best match
+- **🎲 Surprise Me**: Get randomly matched with any historical figure
 
-### 💬 **chat** (`chat/`)
-**Purpose**: User interaction and messaging
-- **Models**: Chat sessions, messages, conversation history
-- **Features**: Real-time communication, chat history
-- **Use Case**: User support and interaction logging
+### 3. Watch the Magic
+- Real-time progress tracking through 4 stages:
+  - 📤 Uploading your image securely
+  - 🔍 AI analyzing facial features  
+  - 👥 Matching with historical figures
+  - ✨ Creating your transformation
 
-### 🔄 **faceswap** (`faceswap/`)
-**Purpose**: Face swap job management and tracking
-- **Models**: `FaceSwapJob` for tracking AI processing
-- **Features**: Job creation, status tracking, result management
-- **Integration**: Interfaces with Hugging Face Spaces API
+### 4. Share Your Results
+- Download high-quality result images
+- Share directly to social media
+- Copy image links for posting
 
-### 🖼️ **imagegen** (`imagegen/`)
-**Purpose**: Core image generation and processing
-- **Models**: `GeneratedImage`, processing metadata
-- **Features**: Image upload, AI processing pipeline, result storage
-- **Integration**: Cloudinary for storage, HuggingFace for AI
-
-### 🔧 **django_project** (`django_project/`)
-**Purpose**: Main project configuration
-- **Files**: `settings.py`, `urls.py`, `wsgi.py`
-- **Features**: Global configuration, URL routing, WSGI application
-
-## 📋 Third-Party Libraries Explained
-
-### **Core Django Extensions**
-```python
-# Authentication & Social Login
-'allauth',                    # Social authentication framework
-'allauth.account',           # Account management
-'allauth.socialaccount',     # Social providers (Google)
-'allauth.socialaccount.providers.google',  # Google OAuth
-
-# API Framework
-'rest_framework',            # RESTful API development
-'rest_framework.authtoken',  # Token-based authentication
-
-# CORS & Security
-'corsheaders',              # Cross-Origin Resource Sharing
-```
-
-### **Media & Storage**
-```python
-# Cloudinary Integration
-'cloudinary_storage',       # Django storage backend for Cloudinary
-'cloudinary',              # Cloudinary Python SDK for image processing
-```
-
-### **Why Each Library?**
-
-- **📱 Django Allauth**: Handles complex authentication flows, social login, email verification
-- **🔌 DRF**: Provides serializers, viewsets, authentication for clean API development  
-- **🌐 CORS Headers**: Enables frontend-backend communication across different domains
-- **☁️ Cloudinary**: CDN + image transformations + automatic optimization
-- **🔐 REST Framework**: Token authentication, pagination, filtering for APIs
-
-## 🤖 Face Recognition Pipeline
-
-### **How It Works**
-
-1. **📸 Image Upload**
-   ```python
-   # Frontend uploads to Django
-   POST /api/imagegen/generate/
-   Content-Type: multipart/form-data
-   ```
-
-2. **🔍 Face Detection**
-   ```python
-   import face_recognition
-   
-   # Detect faces in uploaded image
-   face_locations = face_recognition.face_locations(image)
-   face_encodings = face_recognition.face_encodings(image, face_locations)
-   ```
-
-3. **🚀 AI Processing**
-   ```python
-   from gradio_client import Client
-   
-   # Connect to Hugging Face Space
-   client = Client(HUGGINGFACE_SPACE_NAME, hf_token=HUGGINGFACE_API_TOKEN)
-   
-   # Submit face swap job
-   result = client.predict(
-       source_image=source_file,
-       target_image=target_file
-   )
-   ```
-
-4. **📊 Status Tracking**
-   ```python
-   # Real-time status updates
-   job = FaceSwapJob.objects.create(
-       user=request.user,
-       status='processing',
-       prediction_id=result.job_id
-   )
-   ```
-
-5. **💾 Result Storage**
-   ```python
-   # Store result in Cloudinary
-   cloudinary.uploader.upload(
-       result_image,
-       public_id=f"faceswap/{job.id}",
-       transformation={'quality': 'auto', 'fetch_format': 'auto'}
-   )
-   ```
-
-### **AI Models Used**
-- **Face Fusion**: Advanced face swapping with high fidelity
-- **Face Detection**: dlib's HOG + CNN face detection
-- **Face Alignment**: 68-point facial landmark detection
-- **Style Transfer**: Neural style transfer for seamless blending
-
-## 📡 API Endpoints
+## 🔌 API Documentation
 
 ### Authentication
-- `POST /api/accounts/register/` - User registration
-- `POST /api/accounts/login/` - User login  
-- `POST /api/accounts/logout/` - User logout
-- `GET /api/accounts/profile/` - User profile
+```bash
+# Google OAuth
+POST /api/accounts/auth/google/
+Content-Type: application/json
+{
+  "credential": "google_jwt_token",
+  "user_info": { "email": "user@example.com", ... }
+}
 
-### Face Swap
-- `POST /api/imagegen/generate/` - Generate face swap
-- `GET /api/imagegen/status/{id}/` - Check processing status
-- `GET /api/imagegen/list/` - List user's generations
-- `POST /api/imagegen/unlock/` - Unlock premium generation
+# Get user profile
+GET /api/accounts/me/
+Authorization: Token your_auth_token
+```
 
-### Health & Debug
-- `GET /health/` - Backend health status
-- `GET /api/faceswap/debug/` - Debug Gradio connection
-- `GET /api/faceswap/test-gradio/` - Test HF Space connectivity
+### Image Processing
+```bash
+# Generate face swap
+POST /api/imagegen/generate/
+Authorization: Token your_auth_token
+Content-Type: multipart/form-data
+selfie: [image_file]
+
+# Random transformation
+POST /api/imagegen/randomize/
+Authorization: Token your_auth_token  
+Content-Type: multipart/form-data
+selfie: [image_file]
+
+# Check processing status
+GET /api/imagegen/status/{job_id}/
+Authorization: Token your_auth_token
+```
+
+### Response Format
+```json
+{
+  "id": 123,
+  "match_name": "Napoleon Bonaparte",
+  "match_score": 0.87,
+  "message": "Successfully transformed you into Napoleon Bonaparte!",
+  "output_image_url": "https://cloudinary.com/...",
+  "original_selfie_url": "https://cloudinary.com/...",
+  "historical_figure_url": "https://cloudinary.com/...",
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
 
 ## 🚀 Deployment
 
-### Frontend (Netlify)
-
-#### **1. Netlify Configuration**
-Create `netlify.toml` in project root:
-```toml
-[build]
-  publish = "frontend/dist"
-  command = "cd frontend && npm ci && npm run build"
-
-[build.environment]
-  NODE_VERSION = "18"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
-[build.processing]
-  skip_processing = false
-
-[build.processing.css]
-  bundle = true
-  minify = true
-
-[build.processing.js]
-  bundle = true
-  minify = true
-```
-
-#### **2. Deployment Steps**
-1. **Connect Repository**: Link GitHub repo to Netlify
-2. **Build Settings**:
-   - Build command: `cd frontend && npm ci && npm run build`
-   - Publish directory: `frontend/dist`
-   - Node version: `18`
-3. **Environment Variables**: Set in Netlify dashboard
-4. **Deploy**: Automatic on git push to main
-
 ### Backend (Fly.io)
-
-#### **1. Fly.io Configuration (`fly.toml`)**
-```toml
-app = "ai-face-swap-app"
-primary_region = "ewr"
-
-[build]
-  dockerfile = "Dockerfile"
-
-[env]
-  PORT = "8000"
-  DJANGO_SETTINGS_MODULE = "django_project.settings"
-
-[http_service]
-  internal_port = 8000
-  force_https = true
-  auto_stop_machines = true
-  auto_start_machines = true
-  min_machines_running = 0
-
-[[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
-  method = "GET"
-  timeout = "5s"
-  path = "/health/"
-
-[processes]
-  app = "gunicorn --bind 0.0.0.0:8000 --workers 3 --timeout 300 django_project.wsgi:application"
-
-[[vm]]
-  cpu_kind = "shared"
-  cpus = 1
-  memory_mb = 512
-```
-
-#### **2. Understanding fly.toml**
-
-- **🏗️ `[build]`**: Specifies Dockerfile for containerization
-- **🌍 `[env]`**: Environment variables available to all processes
-- **🌐 `[http_service]`**: HTTP routing and health checks
-  - `auto_stop_machines`: Enables auto-scaling to zero (cost optimization)
-  - `auto_start_machines`: Automatic wake-up on requests (cold starts)
-  - `min_machines_running = 0`: Allows complete hibernation
-- **⚡ `[processes]`**: Defines how to run the application (Gunicorn WSGI server)
-- **💻 `[[vm]]`**: Virtual machine specifications (CPU, memory)
-
-#### **3. Deployment Steps**
 ```bash
-# 1. Install Fly CLI
+# Install Fly CLI
 curl -L https://fly.io/install.sh | sh
 
-# 2. Login
-fly auth login
-
-# 3. Create app (if first time)
-fly launch
-
-# 4. Set secrets
-fly secrets set DJANGO_SECRET_KEY=your-secret-key
-fly secrets set DATABASE_URL=your-postgres-url
-fly secrets set CLOUDINARY_URL=your-cloudinary-url
-fly secrets set HUGGINGFACE_API_TOKEN=your-hf-token
-# ... set all other secrets
-
-# 5. Deploy
+# Deploy
 fly deploy
 
-# 6. Check status
-fly status
-fly logs
+# Set environment variables
+fly secrets set DJANGO_SECRET_KEY=your-secret
+fly secrets set DATABASE_URL=your-db-url
+fly secrets set CLOUDINARY_URL=your-cloudinary-url
 ```
 
-#### **4. Auto-Scaling Behavior**
-- **💤 Hibernation**: App sleeps after ~5 minutes of inactivity
-- **⚡ Cold Start**: ~5-10 second wake-up time on first request
-- **💰 Cost Optimization**: Only pay when actively processing requests
-- **📈 Auto-scaling**: Scales up/down based on traffic automatically
-
-### Database (Fly.io PostgreSQL)
+### Frontend (Netlify)
 ```bash
-# Create managed PostgreSQL
-fly postgres create --name ai-face-swap-db --region ewr
+# Build for production
+npm run build
 
-# Attach to your app
-fly postgres attach --app ai-face-swap-app ai-face-swap-db
-
-# This automatically sets DATABASE_URL secret
+# Deploy to Netlify (via CLI or drag-and-drop)
+npx netlify deploy --prod --dir=dist
 ```
 
-## 🔧 Development Workflow
+## 🧪 Development
 
-### **Local Development**
-```bash
-# Start all services
-docker-compose up
-
-# Backend only
-docker-compose up backend db
-
-# Frontend only (for faster iteration)
-cd frontend && npm run dev
-
-# Run migrations
-docker-compose exec backend python manage.py migrate
-
-# Create superuser
-docker-compose exec backend python manage.py createsuperuser
-
-# View logs
-docker-compose logs -f backend
-```
-
-### **Testing**
+### Running Tests
 ```bash
 # Backend tests
-docker-compose exec backend python manage.py test
+python manage.py test
 
 # Frontend tests  
-cd frontend && npm run test
+npm run test
 
-# API testing
-curl -X GET http://localhost:8002/health/
+# End-to-end tests
+npm run test:e2e
 ```
 
-### **Database Management**
+### Code Quality
 ```bash
-# Connect to database
-docker-compose exec db psql -U postgres -d ai_face_swap
+# Backend formatting
+black .
+isort .
+flake8 .
 
-# Backup database
-docker-compose exec db pg_dump -U postgres ai_face_swap > backup.sql
-
-# Restore database
-cat backup.sql | docker-compose exec -T db psql -U postgres -d ai_face_swap
+# Frontend formatting
+npm run lint
+npm run format
 ```
 
-## 🐛 Troubleshooting
-
-### **Auto-Scaling Issues**
-- **Cold Start Delays**: First request after hibernation takes 5-10 seconds
-- **Solution**: Consider upgrading Fly.io plan to prevent auto-sleep for production
-
-### **Hugging Face Space Issues**
-- **Space Sleeping**: HF Spaces also auto-sleep to save compute costs
-- **Solution**: Make a test request to wake up the space: `GET /api/faceswap/test-gradio/`
-
-### **CORS Issues**
-- **Symptoms**: Browser blocks requests with CORS policy errors
-- **Check**: Ensure frontend domain is in `CORS_ALLOWED_ORIGINS`
-- **Debug**: Temporarily set `CORS_ALLOW_ALL_ORIGINS = True` for testing
-
-### **Docker Issues**
+### Database Migrations
 ```bash
-# Rebuild containers
-docker-compose down && docker-compose up --build
+# Create migration
+python manage.py makemigrations
 
-# Clear volumes
-docker-compose down -v
+# Apply migrations
+python manage.py migrate
 
-# View container logs
+# Reset database (development only)
+python manage.py flush
+```
+
+## 📊 Monitoring & Logging
+
+### Application Logs
+```bash
+# View Django logs
 docker-compose logs backend
+
+# View Celery worker logs
+docker-compose logs celery_worker
+
+# View frontend logs
 docker-compose logs frontend
 ```
 
-### **Image Processing Failures**
-- **Check**: Cloudinary quotas and API limits
-- **Verify**: Hugging Face Space is running and accessible
-- **Debug**: Use `/api/faceswap/debug/` endpoint for diagnostics
-
-## 🔐 Security Best Practices
-
-- **🔑 Secrets Management**: Use environment variables, never commit secrets
-- **🌐 CORS**: Set specific origins in production (`CORS_ALLOW_ALL_ORIGINS = False`)
-- **🔒 HTTPS**: Enforced by Netlify and Fly.io automatically
-- **🛡️ CSRF Protection**: Enabled by default in Django
-- **📝 Input Validation**: DRF serializers handle API input validation
-- **🏗️ SQL Injection**: Django ORM protects against SQL injection
-- **📊 Rate Limiting**: Consider adding rate limiting for API endpoints
-
-## 📄 License
-
-[Specify your license]
+### Performance Monitoring
+- Backend: Django Debug Toolbar (development)
+- Frontend: Vite bundle analyzer
+- Database: PostgreSQL query logging
+- Celery: Flower monitoring (planned)
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. **Fork the repository**
+2. **Create feature branch**: `git checkout -b feature/amazing-feature`
+3. **Commit changes**: `git commit -m 'Add amazing feature'`
+4. **Push to branch**: `git push origin feature/amazing-feature`  
+5. **Open Pull Request**
+
+### Development Guidelines
+- Follow existing code style (use Black/Prettier)
+- Write tests for new features
+- Update documentation as needed
+- Keep commits atomic and well-described
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **HuggingFace** - AI model hosting and inference
+- **Cloudinary** - Image storage and optimization
+- **Historical Figure Images** - Various public domain sources
+- **Open Source Libraries** - All the amazing tools that make this possible
 
 ## 📞 Support
 
-- 🐛 **Issues**: https://github.com/mattyray/ai-convert/issues
-- 📧 **Email**: [mnraynor90@gmail.com]
-- 📖 **Documentation**: [in ma head]
+- **Issues**: [GitHub Issues](https://github.com/yourusername/historyface/issues)
+- **Documentation**: [Wiki](https://github.com/yourusername/historyface/wiki)
+- **Email**: support@historyface.com
+
+## 🗺️ Roadmap
+
+- [ ] **Enhanced AI Models**: More accurate face matching
+- [ ] **Historical Figure Expansion**: Add more personalities 
+- [ ] **Video Processing**: Transform videos, not just images
+- [ ] **Mobile App**: Native iOS/Android applications
+- [ ] **Social Features**: Share galleries, user profiles
+- [ ] **API Rate Limiting**: Advanced usage controls
+- [ ] **Analytics Dashboard**: Processing statistics
+- [ ] **Multi-language Support**: Internationalization
 
 ---
 
-Built with ❤️ using modern web technologies and AI. Don't hate ma hands dont work
+**Built with ❤️ using Django, React, and AI**
+
+Transform into history. Discover your past. Share your story.

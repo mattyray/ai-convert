@@ -1,0 +1,1453 @@
+# CLEAN BACKEND CODE SNAPSHOT
+# Essential files for HuggingFace debugging
+# Total files: 48
+# Excludes: migrations, tests, media, large JSON files
+
+# ===== CONFIGURATION FILES =====
+
+
+## requirements.txt
+```
+# Core
+Django==5.1.6
+gunicorn==23.0.0
+whitenoise==6.9.0
+psycopg2-binary==2.9.10
+
+# Environment + security
+django-environ==0.12.0
+cryptography==44.0.3
+
+# Auth + social login
+django-allauth==65.6.0
+django-crispy-forms==2.3
+crispy-bootstrap5==2024.10
+django-extensions==4.1
+
+# Media + storage
+cloudinary==1.44.0
+django-cloudinary-storage==0.3.0
+Pillow==10.0.0
+
+# APIs + HTTP
+stripe==12.0.1
+openai==1.78.1
+httpx==0.28.1
+requests==2.32.3
+urllib3==2.4.0
+certifi==2025.4.26
+idna==3.10
+charset-normalizer==3.4.2
+
+djangorestframework==3.16.0
+
+# Type + utility
+pydantic>=2.6,<2.10
+typing_extensions==4.13.0
+typing-inspection==0.4.0
+pytz==2025.2
+tzdata==2025.2
+
+# Optional: Data tools (remove if not used in chat utils)
+numpy==2.2.4
+pandas==2.2.3
+pandas-stubs==2.2.3.250308
+python-dateutil==2.9.0.post0
+tablib==3.8.0
+openpyxl==3.1.5
+
+PyJWT==2.10.1
+
+face-recognition==1.3.0
+dlib==20.0.0
+cmake==4.0.2
+
+django-cors-headers==4.6.0
+gradio-client==1.10.3
+
+
+dj-database-url==2.1.0
+
+psutil==5.9.0
+
+celery==5.5.3
+django-celery-beat==2.8.1
+django-celery-results==2.6.0
+redis==5.2.0
+
+google-auth==2.40.3
+google-auth-oauthlib==1.2.2
+google-auth-httplib2==0.2.0
+
+
+```
+
+## requirements-dev.txt
+```
+-r requirements.txt
+
+flake8==7.2.0
+flake8-bandit==4.1.1
+mypy==1.15.0
+mypy_extensions==1.1.0
+pytest==8.3.5
+pytest-django==4.11.1
+safety==3.5.0
+safety-schemas==0.0.14
+
+```
+
+## docker-compose.yml
+```
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: faceswap_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Django Backend (uses regular dev settings)
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8000"  # Only bind to localhost
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,backend,0.0.0.0
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      # 🔥 FIXED: Added Google OAuth credentials
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - FACEBOOK_CLIENT_ID=${FACEBOOK_CLIENT_ID}
+      - FACEBOOK_CLIENT_SECRET=${FACEBOOK_CLIENT_SECRET}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 NOT a Celery worker
+      - IS_CELERY_WORKER=false
+    volumes:
+      - .:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+  # Celery Worker (uses same dev settings but with special env var)
+  celery_worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      # 🔥 FIXED: Added Google OAuth credentials
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - FACEBOOK_CLIENT_ID=${FACEBOOK_CLIENT_ID}
+      - FACEBOOK_CLIENT_SECRET=${FACEBOOK_CLIENT_SECRET}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 CRITICAL: Mark this as a Celery worker
+      - IS_CELERY_WORKER=true
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "django_project", "worker", "--loglevel=info"]
+
+  # Celery Beat (uses same dev settings but with special env var)
+  celery_beat:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DJANGO_DEBUG=True
+      - DJANGO_SETTINGS_MODULE=django_project.settings.dev
+      - DATABASE_URL=postgresql://postgres:postgres_password@db:5432/faceswap_db
+      - DJANGO_SECRET_KEY=dev-secret-key-change-in-production
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - HUGGINGFACE_SPACE_NAME=${HUGGINGFACE_SPACE_NAME}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      # 🔥 FIXED: Added Google OAuth credentials
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - FACEBOOK_CLIENT_ID=${FACEBOOK_CLIENT_ID}
+      - FACEBOOK_CLIENT_SECRET=${FACEBOOK_CLIENT_SECRET}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 🔥 CRITICAL: Mark this as a Celery worker
+      - IS_CELERY_WORKER=true
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "django_project", "beat", "--loglevel=info", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
+  redis_data:
+```
+
+## fly.toml
+```
+app = "ai-face-swap-app"
+primary_region = "ewr"
+console_command = "/code/manage.py shell"
+
+[build]
+
+[env]
+  PORT = "8000"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_start_machines = true
+  auto_stop_machines = false        # ← CHANGED: Disable auto-stopping
+  min_machines_running = 2          # ← CHANGED: Keep 2 machines running
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 20
+    hard_limit = 25
+
+[[vm]]
+  memory = "4gb"
+  cpu_kind = "shared"
+  cpus = 2          # ← Change this from 1 to 2
+
+[[statics]]
+  guest_path = "/code/static"
+  url_prefix = "/static/"
+
+# Postgres internal service (Flycast resolution) - LEAVE THIS AS-IS
+[[services]]
+  internal_port = 5432
+  protocol = "tcp"
+  auto_start_machines = true
+  auto_stop_machines = true
+  processes = ["app"]
+
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 20
+    hard_limit = 25
+
+  [[services.ports]]
+    port = 5432
+    handlers = ["pg_tls"]
+```
+
+## manage.py
+```
+#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "django_project.settings.dev")
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == '__main__':
+    main()
+
+```
+
+
+# ===== PYTHON CODE =====
+
+
+## accounts/models.py
+```python
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
+from django.db import models
+from django.utils import timezone
+from django.contrib.auth.base_user import BaseUserManager
+
+
+class CustomUserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError("The Email field must be set")
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password, **extra_fields):
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        if not extra_fields.get("is_staff") or not extra_fields.get("is_superuser"):
+            raise ValueError("Superuser must have is_staff=True and is_superuser=True.")
+        return self.create_user(email, password, **extra_fields)
+
+
+class CustomUser(AbstractBaseUser, PermissionsMixin):
+    email = models.EmailField(unique=True)
+    first_name = models.CharField(max_length=30, blank=True)
+    last_name = models.CharField(max_length=30, blank=True)
+    is_staff = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    date_joined = models.DateTimeField(default=timezone.now)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = CustomUserManager()
+
+    def __str__(self):
+        return self.email
+
+```
+
+## accounts/social_auth.py
+```python
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import get_user_model
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+User = get_user_model()
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GoogleAuthView(APIView):
+    def post(self, request):
+        """Simplified Google OAuth - no JWT verification needed"""
+        try:
+            print("🔑 Google auth request received")
+            print(f"Request data keys: {list(request.data.keys())}")
+            
+            credential = request.data.get('credential')
+            user_info = request.data.get('user_info', {})
+            
+            if not credential:
+                print("❌ No credential provided")
+                return Response({'error': 'Google credential required'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+            
+            # Extract email from user_info (already parsed by frontend)
+            email = user_info.get('email')
+            if not email:
+                print("❌ No email in user_info")
+                print(f"Available user_info: {user_info}")
+                return Response({'error': 'Email not provided'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+            
+            print(f"✅ Processing auth for email: {email}")
+            
+            # Get or create user (simplified approach)
+            try:
+                user = User.objects.get(email=email)
+                print(f"👤 Found existing user: {email}")
+                
+                # Update names if they're empty
+                if not user.first_name and user_info.get('given_name'):
+                    user.first_name = user_info.get('given_name', '')
+                if not user.last_name and user_info.get('family_name'):
+                    user.last_name = user_info.get('family_name', '')
+                user.save()
+                
+            except User.DoesNotExist:
+                print(f"📝 Creating new user: {email}")
+                user = User.objects.create_user(
+                    email=email,
+                    first_name=user_info.get('given_name', ''),
+                    last_name=user_info.get('family_name', ''),
+                )
+            
+            # Create or get token
+            token, created = Token.objects.get_or_create(user=user)
+            print(f"🔑 Token {'created' if created else 'retrieved'} for user")
+            
+            response_data = {
+                'token': token.key,
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                }
+            }
+            
+            print(f"✅ Sending success response for user {email}")
+            return Response(response_data)
+            
+        except Exception as e:
+            print(f"❌ Unexpected error in Google auth: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response({'error': 'Google authentication failed'}, 
+                          status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class FacebookAuthView(APIView):
+    def post(self, request):
+        """Facebook auth placeholder"""
+        return Response({'error': 'Facebook auth not available on HTTP'}, 
+                      status=status.HTTP_400_BAD_REQUEST)
+```
+
+## accounts/serializers.py
+```python
+from rest_framework import serializers
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+class CustomUserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=True, min_length=8)
+
+    class Meta:
+        model = User
+        fields = ["id", "email", "first_name", "last_name", "password"]
+        read_only_fields = ["id"]
+
+    def create(self, validated_data):
+        user = User.objects.create_user(
+            email=validated_data["email"],
+            password=validated_data["password"],
+            first_name=validated_data.get("first_name", ""),
+            last_name=validated_data.get("last_name", "")
+        )
+        return user
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            if attr == "password":
+                instance.set_password(value)
+            else:
+                setattr(instance, attr, value)
+        instance.save()
+        return instance
+
+```
+
+## accounts/__init__.py
+```python
+
+```
+
+## accounts/apps.py
+```python
+from django.apps import AppConfig
+
+
+class AccountsConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'accounts'
+
+```
+
+## accounts/forms.py
+```python
+from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import UserCreationForm, UserChangeForm
+
+class CustomUserCreationForm(UserCreationForm):
+    class Meta:
+        model = get_user_model()
+        fields = ("email",)  # Remove 'username'
+
+class CustomUserChangeForm(UserChangeForm):
+    class Meta:
+        model = get_user_model()
+        fields = ("email",)  # Remove 'username'
+
+```
+
+## accounts/admin.py
+```python
+from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin
+from .models import CustomUser
+from .forms import CustomUserCreationForm, CustomUserChangeForm
+
+@admin.register(CustomUser)
+class CustomUserAdmin(UserAdmin):
+    add_form = CustomUserCreationForm
+    form = CustomUserChangeForm
+    model = CustomUser
+
+    list_display = ("email", "first_name", "last_name", "is_staff", "is_active")
+    list_filter = ("is_staff", "is_active")
+    ordering = ("email",)
+
+    fieldsets = (
+        (None, {"fields": ("email", "password")}),
+        ("Personal Info", {"fields": ("first_name", "last_name")}),
+        ("Permissions", {"fields": ("is_staff", "is_active", "groups", "user_permissions")}),
+        ("Important dates", {"fields": ("last_login", "date_joined")}),
+    )
+
+    add_fieldsets = (
+        (None, {
+            "classes": ("wide",),
+            "fields": ("email", "password1", "password2", "is_staff", "is_active"),
+        }),
+    )
+
+```
+
+## accounts/api_auth.py
+```python
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+
+
+class CustomAuthToken(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response({"error": "Email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = authenticate(request, username=email, password=password)
+
+        if not user:
+            return Response({"error": "Invalid credentials."}, status=status.HTTP_400_BAD_REQUEST)
+
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({
+            "token": token.key,
+            "user_id": user.id,
+            "email": user.email,
+        })
+
+```
+
+## accounts/urls.py
+```python
+from django.urls import path
+from .views import SignupAPIView, UserProfileAPIView, CustomAuthToken
+from .social_auth import GoogleAuthView, FacebookAuthView
+
+
+app_name = "accounts"
+
+urlpatterns = [
+    path("signup/", SignupAPIView.as_view(), name="signup"),
+    path("me/", UserProfileAPIView.as_view(), name="user-profile"),
+    path("login/", CustomAuthToken.as_view(), name="token-login"),
+    path("auth/google/", GoogleAuthView.as_view(), name="google-auth"),
+    path("auth/facebook/", FacebookAuthView.as_view(), name="facebook-auth"),
+
+
+]
+
+```
+
+## accounts/views.py
+```python
+from rest_framework import generics, permissions, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate, get_user_model
+
+from .serializers import CustomUserSerializer
+
+User = get_user_model()
+
+
+class SignupAPIView(generics.CreateAPIView):
+    """
+    POST /api/accounts/signup/
+    """
+    queryset = User.objects.all()
+    serializer_class = CustomUserSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class UserProfileAPIView(APIView):
+    """
+    GET, PUT /api/accounts/me/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        serializer = CustomUserSerializer(request.user)
+        return Response(serializer.data)
+
+    def put(self, request):
+        serializer = CustomUserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CustomAuthToken(ObtainAuthToken):
+    """
+    POST /api/accounts/login/
+    Authenticates using email and password.
+    """
+    def post(self, request, *args, **kwargs):
+        email = request.data.get("email")
+        password = request.data.get("password")
+
+        if not email or not password:
+            return Response({"error": "Email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = authenticate(request, email=email, password=password)
+        if not user:
+            return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        token, created = Token.objects.get_or_create(user=user)
+        return Response({"token": token.key})
+
+```
+
+## faceswap/models.py
+```python
+from django.db import models
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+class FaceSwapJob(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    source_image = models.ImageField(upload_to='faceswap/source/')
+    target_image = models.ImageField(upload_to='faceswap/target/')
+    result_image = models.ImageField(upload_to='faceswap/results/', null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"FaceSwap Job {self.id} - {self.user.email} - {self.status}"
+```
+
+## faceswap/serializers.py
+```python
+from rest_framework import serializers
+from .models import FaceSwapJob
+
+class FaceSwapJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FaceSwapJob
+        fields = ['id', 'source_image', 'target_image', 'result_image', 
+                 'status', 'error_message', 'created_at', 'completed_at']
+        read_only_fields = ['id', 'result_image', 'status', 'error_message', 
+                           'created_at', 'completed_at']
+
+class FaceSwapCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FaceSwapJob
+        fields = ['source_image', 'target_image']
+```
+
+## faceswap/__init__.py
+```python
+
+```
+
+## faceswap/apps.py
+```python
+from django.apps import AppConfig
+
+class FaceswapConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'faceswap'
+```
+
+## faceswap/admin.py
+```python
+from django.contrib import admin
+from .models import FaceSwapJob
+
+@admin.register(FaceSwapJob)
+class FaceSwapJobAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user', 'status', 'created_at', 'completed_at']
+    list_filter = ['status', 'created_at']
+    search_fields = ['user__email']
+    readonly_fields = ['created_at', 'completed_at']
+    
+    def get_readonly_fields(self, request, obj=None):
+        if obj:  # Editing existing object
+            return self.readonly_fields + ['user', 'source_image', 'target_image']
+        return self.readonly_fields
+```
+
+## faceswap/huggingface_utils.py
+```python
+# faceswap/huggingface_utils.py - IMPROVED VERSION WITH MEMORY MANAGEMENT
+
+import requests
+import time
+from django.conf import settings
+from django.core.files.base import ContentFile
+import tempfile
+import os
+import base64
+from gradio_client import Client
+import random
+import threading
+import json
+import gc
+import psutil
+
+# 🔗 HuggingFace Space Configuration - matches environment variables
+HUGGINGFACE_SPACE_NAME = getattr(settings, 'HUGGINGFACE_SPACE_NAME', 
+                                'mnraynor90/facefusionfastapi-private')
+
+# 🔑 HuggingFace Authentication Token (from environment)
+HUGGINGFACE_API_TOKEN = getattr(settings, 'HUGGINGFACE_API_TOKEN', None)
+
+# Export these for use in views
+__all__ = ['FaceFusionClient', 'process_face_swap', 'HUGGINGFACE_SPACE_NAME', 'HUGGINGFACE_API_TOKEN']
+
+def log_memory_usage(stage):
+    """Log current memory usage for debugging"""
+    try:
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        print(f"📊 Memory at {stage}: {memory_mb:.1f} MB")
+    except Exception as e:
+        print(f"⚠️ Memory logging failed: {e}")
+
+def validate_huggingface_config():
+    """Validate HuggingFace configuration for security and correctness"""
+    issues = []
+    
+    # Check space name format
+    if not HUGGINGFACE_SPACE_NAME or '/' not in HUGGINGFACE_SPACE_NAME:
+        issues.append("Invalid HUGGINGFACE_SPACE_NAME format. Expected: 'owner/space-name'")
+    
+    # Check API token
+    if not HUGGINGFACE_API_TOKEN or HUGGINGFACE_API_TOKEN in ['dummy', 'your_token_here']:
+        issues.append("Missing or invalid HUGGINGFACE_API_TOKEN. Private spaces require authentication.")
+    elif not HUGGINGFACE_API_TOKEN.startswith('hf_'):
+        issues.append("Invalid HUGGINGFACE_API_TOKEN format. HuggingFace tokens should start with 'hf_'")
+    elif len(HUGGINGFACE_API_TOKEN) < 30:
+        issues.append("HUGGINGFACE_API_TOKEN appears too short to be valid")
+    
+    return issues
+
+class FaceFusionClient:
+    """
+    IMPROVED: Proper Gradio Client for private space with enhanced authentication and memory management
+    """
+    
+    def __init__(self):
+        self.client = None
+        self.space_name = HUGGINGFACE_SPACE_NAME
+        self._validate_config()
+        
+    def _validate_config(self):
+        """Validate configuration before attempting connection"""
+        issues = validate_huggingface_config()
+        if issues:
+            raise Exception(f"HuggingFace configuration issues: {'; '.join(issues)}")
+    
+    def get_client(self):
+        """Get authenticated Gradio client for private space with enhanced error handling"""
+        if self.client is None:
+            try:
+                print(f"🔌 Creating authenticated Gradio client for: {self.space_name}")
+                print(f"🔑 Token length: {len(HUGGINGFACE_API_TOKEN)} chars")
+                
+                # Connect to private space with authentication
+                self.client = Client(
+                    self.space_name,
+                    hf_token=HUGGINGFACE_API_TOKEN
+                )
+                
+                print("✅ Authenticated Gradio client created successfully")
+                
+                # Test the connection by getting API info
+                try:
+                    api_info = self.client.view_api()
+                    print(f"📋 API connection successful")
+                    
+                    # Check for required endpoints
+                    api_str = str(api_info)
+                    if '/process_images' in api_str:
+                        print("✅ Required /process_images endpoint found")
+                    else:
+                        print(f"⚠️ /process_images endpoint not found. Available: {api_str[:200]}...")
+                        
+                except Exception as e:
+                    print(f"⚠️ Could not verify API endpoints: {e}")
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                if 'authentication' in error_msg or 'token' in error_msg or 'unauthorized' in error_msg:
+                    raise Exception(f"❌ Authentication failed: Invalid or expired HuggingFace API token. Please check your HUGGINGFACE_API_TOKEN")
+                elif 'not found' in error_msg or '404' in error_msg:
+                    raise Exception(f"❌ Space not found: '{self.space_name}' does not exist or is not accessible")
+                elif 'rate limit' in error_msg or 'too many' in error_msg:
+                    raise Exception(f"❌ Rate limited: Too many requests to HuggingFace. Please try again later")
+                else:
+                    raise Exception(f"❌ Failed to create Gradio client: {e}")
+                
+        return self.client
+    
+    def test_connection(self):
+        """Test connection without performing operations"""
+        try:
+            client = self.get_client()
+            api_info = client.view_api()
+            return {
+                'status': 'success',
+                'space_name': self.space_name,
+                'token_valid': True,
+                'api_endpoints_available': '/process_images' in str(api_info)
+            }
+        except Exception as e:
+            return {
+                'status': 'failed',
+                'space_name': self.space_name,
+                'token_valid': False,
+                'error': str(e)
+            }
+    
+    def get_image_url(self, image_field):
+        """Convert Django ImageField to accessible URL"""
+        try:
+            if hasattr(image_field, 'url'):
+                image_url = image_field.url
+                
+                if image_url.startswith('http'):
+                    return image_url
+                
+                if image_url.startswith('/') and hasattr(image_field, 'name'):
+                    try:
+                        import cloudinary.utils
+                        cloudinary_url = cloudinary.utils.cloudinary_url(image_field.name)[0]
+                        print(f"✅ Using Cloudinary URL: {cloudinary_url}")
+                        return cloudinary_url
+                    except Exception as e:
+                        print(f"⚠️ Cloudinary failed: {e}")
+                        base_url = getattr(settings, 'BASE_URL', 'http://127.0.0.1:8002')
+                        return f"{base_url}{image_url}"
+                
+                return image_url
+            else:
+                raise Exception("Invalid image field")
+        except Exception as e:
+            raise Exception(f"Failed to get image URL: {str(e)}")
+    
+    def setup_facefusion(self):
+        """Setup FaceFusion before processing with retry logic"""
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                print(f"🔧 Setting up FaceFusion (attempt {attempt + 1}/{max_retries})...")
+                client = self.get_client()
+                
+                result = client.predict(api_name="/setup_facefusion")
+                print(f"✅ Setup complete: {result}")
+                return result
+                
+            except Exception as e:
+                print(f"❌ Setup attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    self.client = None  # Reset client for retry
+                    continue
+                raise e
+    
+    def swap_faces(self, source_image_field, target_image_field, max_retries=3):
+        """
+        IMPROVED: Use proper Gradio client with enhanced error handling and memory management
+        """
+        log_memory_usage("start_swap")
+        
+        try:
+            # Get URLs
+            source_url = self.get_image_url(source_image_field)
+            target_url = self.get_image_url(target_image_field)
+            
+            print(f"🔄 Starting face swap with Gradio client")
+            print(f"  Source: {source_url[:80]}...")
+            print(f"  Target: {target_url[:80]}...")
+            
+            for attempt in range(max_retries):
+                try:
+                    print(f"🎭 Face swap attempt {attempt + 1}/{max_retries}")
+                    
+                    client = self.get_client()
+                    
+                    # Optional: Setup FaceFusion first
+                    try:
+                        self.setup_facefusion()
+                    except Exception as setup_error:
+                        print(f"⚠️ Setup failed: {setup_error}, continuing anyway...")
+                    
+                    log_memory_usage("before_api_call")
+                    
+                    # Call the correct API endpoint with proper parameters
+                    result = client.predict(
+                        source_url=source_url,  # 👤 Source Image URL (Face to transfer)
+                        target_url=target_url,  # 🎯 Target Image URL (Body/scene)
+                        api_name="/process_images"
+                    )
+                    
+                    log_memory_usage("after_api_call")
+                    
+                    print(f"📋 Gradio result: {type(result)} - {result}")
+                    
+                    if not result or len(result) < 2:
+                        raise Exception(f"Invalid result format: {result}")
+                    
+                    result_filepath = result[0]  # Image file path
+                    status_message = result[1]   # Status message
+                    
+                    print(f"📋 Status: {status_message}")
+                    print(f"📁 Result file: {result_filepath}")
+                    
+                    # Handle the result file path
+                    result_data = None
+                    
+                    if hasattr(result_filepath, 'save'):  # PIL Image
+                        print("✅ Got PIL Image, converting to bytes")
+                        import io
+                        img_buffer = io.BytesIO()
+                        result_filepath.save(img_buffer, format='JPEG', quality=90)
+                        result_data = img_buffer.getvalue()
+                        
+                    elif isinstance(result_filepath, str) and os.path.exists(result_filepath):  # File path
+                        print(f"✅ Got file path: {result_filepath}")
+                        with open(result_filepath, 'rb') as f:
+                            result_data = f.read()
+                        
+                        # 🔥 NEW: Delete temp file immediately
+                        try:
+                            os.unlink(result_filepath)
+                            print(f"🧹 Deleted temp file: {result_filepath}")
+                        except Exception as cleanup_error:
+                            print(f"⚠️ Failed to delete temp file: {cleanup_error}")
+                            
+                    elif isinstance(result_filepath, dict):  # Gradio file object
+                        if 'path' in result_filepath and os.path.exists(result_filepath['path']):
+                            print(f"✅ Got Gradio file object: {result_filepath['path']}")
+                            with open(result_filepath['path'], 'rb') as f:
+                                result_data = f.read()
+                            
+                            # 🔥 NEW: Delete temp file immediately
+                            try:
+                                os.unlink(result_filepath['path'])
+                                print(f"🧹 Deleted temp file: {result_filepath['path']}")
+                            except Exception as cleanup_error:
+                                print(f"⚠️ Failed to delete temp file: {cleanup_error}")
+                                
+                        elif 'url' in result_filepath:
+                            print(f"✅ Got URL from Gradio: {result_filepath['url']}")
+                            # Download from URL
+                            response = requests.get(result_filepath['url'], timeout=60)
+                            response.raise_for_status()
+                            result_data = response.content
+                            
+                    else:
+                        raise Exception(f"Unexpected result format: {type(result_filepath)} - {result_filepath}")
+                    
+                    if result_data:
+                        # 🔥 NEW: Force cleanup and garbage collection
+                        gc.collect()
+                        log_memory_usage("after_processing")
+                        return result_data
+                    else:
+                        raise Exception("No result data extracted")
+                        
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    print(f"❌ Face swap attempt {attempt + 1} failed: {e}")
+                    
+                    # Handle specific error types
+                    if 'authentication' in error_msg or 'unauthorized' in error_msg:
+                        raise Exception("Authentication failed. Please check your HuggingFace API token.")
+                    elif 'slow down' in error_msg or 'too many' in error_msg or 'rate limit' in error_msg:
+                        print("🚨 Rate limited - resetting client")
+                        self.client = None  # Reset client
+                        
+                        if attempt < max_retries - 1:
+                            delay = (2 ** attempt) * 3 + random.uniform(0, 3)
+                            print(f"⏳ Waiting {delay:.1f}s...")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            raise Exception("Rate limited after all retries")
+                    
+                    elif attempt < max_retries - 1:
+                        delay = 5 + random.uniform(0, 2)
+                        print(f"⏳ Retrying in {delay:.1f}s...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        break
+            
+            raise Exception(f"All face swap attempts failed")
+            
+        finally:
+            # 🔥 NEW: Always cleanup at the end
+            gc.collect()
+            log_memory_usage("cleanup_complete")
+
+def process_face_swap(job_id):
+    """
+    Process a face swap job using the improved Gradio client with memory management
+    """
+    from .models import FaceSwapJob
+    from django.utils import timezone
+    
+    log_memory_usage("job_start")
+    
+    try:
+        job = FaceSwapJob.objects.get(id=job_id)
+        job.status = 'processing'
+        job.save()
+        
+        print(f"🚀 Processing face swap job {job_id} with improved Gradio client")
+        
+        # Initialize the client
+        client = FaceFusionClient()
+        
+        # Test connection first
+        connection_test = client.test_connection()
+        if connection_test['status'] != 'success':
+            raise Exception(f"Connection test failed: {connection_test['error']}")
+        
+        # Perform face swap
+        result_image_data = client.swap_faces(job.source_image, job.target_image)
+        
+        # Save result
+        result_filename = f"faceswap_result_{job.id}_{int(time.time())}.jpg"
+        result_file = ContentFile(result_image_data, name=result_filename)
+        job.result_image.save(result_filename, result_file)
+        
+        # Update status
+        job.status = 'completed'
+        job.completed_at = timezone.now()
+        job.save()
+        
+        log_memory_usage("job_complete")
+        print(f"✅ Face swap job {job_id} completed successfully")
+        return True
+        
+    except FaceSwapJob.DoesNotExist:
+        print(f"❌ Face swap job {job_id} not found")
+        return False
+    except Exception as e:
+        print(f"❌ Face swap job {job_id} failed: {e}")
+        try:
+            job.status = 'failed'
+            job.error_message = str(e)
+            job.save()
+        except:
+            pass
+        return False
+    finally:
+        # 🔥 NEW: Force cleanup
+        gc.collect()
+        log_memory_usage("job_cleanup")
+```
+
+## faceswap/urls.py
+```python
+from django.urls import path
+from .views import (
+    FaceSwapCreateView,
+    FaceSwapListView, 
+    FaceSwapDetailView,
+    FaceSwapStatusView,
+)
+
+app_name = "faceswap"
+
+urlpatterns = [
+    path("create/", FaceSwapCreateView.as_view(), name="create"),
+    path("jobs/", FaceSwapListView.as_view(), name="list"),
+    path("jobs/<int:pk>/", FaceSwapDetailView.as_view(), name="detail"),
+    path("status/<int:job_id>/", FaceSwapStatusView.as_view(), name="status"),
+]
+```
+
+## faceswap/views.py
+```python
+from rest_framework import generics, status, permissions
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from django.shortcuts import get_object_or_404
+from .models import FaceSwapJob
+from .serializers import FaceSwapJobSerializer, FaceSwapCreateSerializer
+from .huggingface_utils import process_face_swap
+import threading
+
+
+class FaceSwapCreateView(generics.CreateAPIView):
+    """
+    POST /api/faceswap/create/
+    Upload source and target images to start face swapping
+    """
+    serializer_class = FaceSwapCreateSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Create job with current user
+        job = serializer.save(user=request.user)
+        
+        # Start processing in background thread (or use Celery if available)
+        def process_in_background():
+            process_face_swap(job.id)
+        
+        thread = threading.Thread(target=process_in_background)
+        thread.daemon = True
+        thread.start()
+        
+        # Return job details
+        response_serializer = FaceSwapJobSerializer(job)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class FaceSwapListView(generics.ListAPIView):
+    """
+    GET /api/faceswap/jobs/
+    List all face swap jobs for the current user
+    """
+    serializer_class = FaceSwapJobSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return FaceSwapJob.objects.filter(user=self.request.user)
+
+
+class FaceSwapDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/faceswap/jobs/{id}/
+    Get details of a specific face swap job
+    """
+    serializer_class = FaceSwapJobSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return FaceSwapJob.objects.filter(user=self.request.user)
+
+
+class FaceSwapStatusView(APIView):
+    """
+    GET /api/faceswap/status/{id}/
+    Quick status check for a face swap job
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, job_id):
+        job = get_object_or_404(FaceSwapJob, id=job_id, user=request.user)
+        return Response({
+            'id': job.id,
+            'status': job.status,
+            'error_message': job.error_message,
+            'result_image': job.result_image.url if job.result_image else None,
+            'created_at': job.created_at,
+            'completed_at': job.completed_at
+        })
+```
+
+## imagegen/tasks.py
+```python
+from celery import shared_task
+from django.core.management import call_command
+from django.utils import timezone
+from .models import GeneratedImage
+import logging
+
+logger = logging.getLogger(__name__)
+
+@shared_task(bind=True, max_retries=3)
+def cleanup_expired_images_task(self):
+    """
+    Celery task to clean up expired images from Cloudinary
+    Runs every 6 hours automatically
+    """
+    try:
+        logger.info("🧹 Starting scheduled cleanup of expired images")
+        
+        # Find expired images
+        now = timezone.now()
+        expired_images = GeneratedImage.objects.filter(
+            expires_at__lt=now,
+            is_expired=False,
+            cleanup_attempted=False
+        )
+        
+        count = expired_images.count()
+        logger.info(f"📊 Found {count} expired images to clean up")
+        
+        if count == 0:
+            logger.info("✅ No expired images found")
+            return "No images to clean up"
+        
+        # Process cleanup
+        deleted_count = 0
+        failed_count = 0
+        
+        for img in expired_images:
+            try:
+                deleted_files = img.expire_and_cleanup()
+                logger.info(f"✅ Cleaned up image {img.id}: {deleted_files}")
+                deleted_count += 1
+            except Exception as e:
+                logger.error(f"❌ Failed to cleanup image {img.id}: {e}")
+                failed_count += 1
+        
+        result = f"Cleanup complete: {deleted_count} deleted, {failed_count} failed"
+        logger.info(f"🎉 {result}")
+        return result
+        
+    except Exception as exc:
+        logger.error(f"❌ Cleanup task failed: {exc}")
+        # Retry with exponential backoff
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+@shared_task
+def manual_cleanup_task(force=False):
+    """
+    Manual cleanup task for testing/admin use
+    """
+    if force:
+        # Force cleanup all images (for testing)
+        call_command('cleanup_expired_images', '--force')
+        return "Force cleanup completed"
+    else:
+        # Normal cleanup
+        call_command('cleanup_expired_images')
+        return "Manual cleanup completed"
+```
+
+## imagegen/models.py
+```python
+from django.db import models
+from django.conf import settings
+from cloudinary_storage.storage import MediaCloudinaryStorage
+from django.utils import timezone
+from datetime import timedelta
+import cloudinary.uploader
+
+def get_expiration_time():
+    """Get expiration time 48 hours from now"""
+    return timezone.now() + timedelta(hours=48)
+
+class GeneratedImage(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_images"
+    )
+    prompt = models.TextField()
+    match_name = models.CharField(max_length=100)
+    selfie = models.ImageField(
+        upload_to="uploads/selfies/",
+        storage=MediaCloudinaryStorage()
+    )
+    output_image = models.ImageField(
+        upload_to="uploads/fused/", 
+        null=True, 
+        blank=True,
+        storage=MediaCloudinaryStorage()
+    )
+    output_url = models.URLField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(default=get_expiration_time)
+    is_expired = models.BooleanField(default=False)
+    cleanup_attempted = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.match_name} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+    
+    def delete_from_cloudinary(self):
+        """Delete associated images from Cloudinary"""
+        deleted_files = []
+        try:
+            if self.selfie and hasattr(self.selfie, 'public_id'):
+                cloudinary.uploader.destroy(self.selfie.public_id)
+                deleted_files.append(f"selfie:{self.selfie.public_id}")
+        except Exception as e:
+            print(f"⚠️ Error deleting selfie: {e}")
+        try:
+            if self.output_image and hasattr(self.output_image, 'public_id'):
+                cloudinary.uploader.destroy(self.output_image.public_id)
+                deleted_files.append(f"output:{self.output_image.public_id}")
+        except Exception as e:
+            print(f"⚠️ Error deleting output: {e}")
+        return deleted_files
+    
+    def expire_and_cleanup(self):
+        """Mark as expired and delete from Cloudinary"""
+        deleted_files = self.delete_from_cloudinary()
+        self.is_expired = True
+        self.cleanup_attempted = True
+        self.save()
+        return deleted_files
+    
+    @property
+    def is_expired_now(self):
+        """Check if image should be expired"""
+        return timezone.now() > self.expires_at
+
+
+class UsageSession(models.Model):
+    """Track usage limits for anonymous users"""
+    session_key = models.CharField(max_length=40, unique=True, db_index=True)
+    matches_used = models.IntegerField(default=0)
+    randomizes_used = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    MAX_MATCHES = 1
+    MAX_RANDOMIZES = 1
+    
+    def __str__(self):
+        return f"Session {self.session_key} - M:{self.matches_used}/{self.MAX_MATCHES} R:{self.randomizes_used}/{self.MAX_RANDOMIZES}"
+    
+    @property
+    def can_match(self):
+        return self.matches_used < self.MAX_MATCHES
+    
+    @property
+    def can_randomize(self):
+        return self.randomizes_used < self.MAX_RANDOMIZES
+    
+    @property
+    def is_limited(self):
+        return not self.can_match and not self.can_randomize
+    
+    def use_match(self):
+        if self.can_match:
+            self.matches_used += 1
+            self.save()
+            return True
+        return False
+    
+    def use_randomize(self):
+        if self.can_randomize:
+            self.randomizes_used += 1
+            self.save()
+            return True
+        return False
+    
+    @classmethod
+    def get_or_create_for_session(cls, session_key):
+        usage_session, created = cls.objects.get_or_create(
+            session_key=session_key,
+            defaults={'matches_used': 0, 'randomizes_used': 0}
+        )
+        return usage_session
+```
+
+## imagegen/serializers.py
+```python
+from rest_framework import serializers
+from .models import GeneratedImage
+
+class GeneratedImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GeneratedImage
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'user']
+
+```

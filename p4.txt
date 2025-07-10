@@ -1,0 +1,1558 @@
+# FRONTEND CODE SNAPSHOT
+# Generated for AI Face Swap App
+# Total files: 41
+
+
+
+# ==================== Configuration Files ====================
+
+
+
+# ==== src/vite-env.d.ts ====
+
+/// <reference types="vite/client" />
+
+
+
+
+# ==== src/types/index.ts ====
+
+export interface FaceSwapResult {
+  id: number;
+  match_name: string;
+  match_score: number;
+  message: string;
+  output_image_url: string;
+  original_selfie_url: string;
+  historical_figure_url: string;
+  is_randomized?: boolean;
+  usage?: UsageData | null;
+}
+
+export interface ApiError {
+  error: string;
+  message?: string;
+  feature_type?: 'match' | 'randomize';
+  usage?: UsageData;
+  registration_required?: boolean;
+}
+
+export type ProgressStep = 'uploading' | 'analyzing' | 'matching' | 'swapping' | 'complete';
+
+export interface UploadProgress {
+  step: ProgressStep;
+  progress: number;
+  message: string;
+}
+
+export interface HistoricalFigure {
+  name: string;
+  description: string;
+  imageUrl: string;
+  confidence?: number;
+}
+
+// NEW - Usage tracking types
+export interface UsageData {
+  matches_used: number;
+  matches_limit: number;
+  randomizes_used: number;
+  randomizes_limit: number;
+  can_match: boolean;
+  can_randomize: boolean;
+  is_limited: boolean;
+  unlimited?: boolean;
+  user_authenticated?: boolean;
+}
+
+export interface UsageLimitError extends ApiError {
+  usage: UsageData;
+  registration_required: true;
+}
+
+
+
+# ==== src/hooks/useUsage.ts ====
+
+import { useState, useEffect, useCallback } from 'react';
+import { FaceSwapAPI } from '../services/api';
+import type { UsageData, UsageLimitError } from '../types/index';
+
+interface UseUsageReturn {
+  usage: UsageData | null;
+  loading: boolean;
+  error: string | null;
+  isLimited: boolean;
+  canUseFeature: (feature: 'match' | 'randomize') => boolean;
+  checkUsage: () => Promise<void>;
+  handleUsageLimitError: (error: UsageLimitError) => void;
+  resetUsage: () => void;
+}
+
+export const useUsage = (): UseUsageReturn => {
+  const [usage, setUsage] = useState<UsageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Check if user has hit all limits
+  const isLimited = usage ? usage.is_limited && !usage.unlimited : false;
+
+  // Check if user can use a specific feature
+  const canUseFeature = useCallback((feature: 'match' | 'randomize'): boolean => {
+    if (!usage) return false;
+    if (usage.unlimited) return true;
+    
+    return feature === 'match' ? usage.can_match : usage.can_randomize;
+  }, [usage]);
+
+  // Fetch current usage status
+  const checkUsage = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const usageData = await FaceSwapAPI.getUsageStatus();
+      setUsage(usageData);
+    } catch (err) {
+      console.error('Failed to check usage:', err);
+      setError(err instanceof Error ? err.message : 'Failed to check usage');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Handle usage limit errors from API calls
+  const handleUsageLimitError = useCallback((error: UsageLimitError) => {
+    console.log('Usage limit reached:', error);
+    if (error.usage) {
+      setUsage(error.usage);
+    }
+    setError(error.message || 'Usage limit reached');
+  }, []);
+
+  // Reset usage state (for testing or after login)
+  const resetUsage = useCallback(() => {
+    setUsage(null);
+    setError(null);
+    checkUsage();
+  }, [checkUsage]);
+
+  // Load usage on mount
+  useEffect(() => {
+    checkUsage();
+  }, [checkUsage]);
+
+  return {
+    usage,
+    loading,
+    error,
+    isLimited,
+    canUseFeature,
+    checkUsage,
+    handleUsageLimitError,
+    resetUsage,
+  };
+};
+
+
+
+# ==== src/hooks/useFileUpload.ts ====
+
+// src/hooks/useFileUpload.ts
+
+import { useState } from 'react';
+
+// 📝 TypeScript: Define what our hook returns
+interface UseFileUploadReturn {
+  selectedFile: File | null;           // Either a File object or null
+  isFileSelected: boolean;            // true/false if file exists
+  handleFileSelect: (file: File) => void;  // Function that takes a File
+  handleClearFile: () => void;        // Function that takes nothing
+  error: string | null;               // Error message or null
+}
+
+// 📝 TypeScript: Define what file types we accept
+const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+
+export const useFileUpload = (): UseFileUploadReturn => {
+  // 🎯 State: Store the selected file
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // 🎯 Function: Handle when user selects a file
+  const handleFileSelect = (file: File) => {
+    // Clear any previous errors
+    setError(null);
+
+    // 📋 Validate file type
+    if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
+      setError('Please select a valid image file (JPG, PNG, WebP)');
+      return;
+    }
+
+    // 📋 Validate file size
+    if (file.size > MAX_FILE_SIZE) {
+      setError('File size must be less than 10MB');
+      return;
+    }
+
+    // ✅ File is valid, store it
+    setSelectedFile(file);
+    console.log(`📁 File selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
+  };
+
+  // 🎯 Function: Clear the selected file
+  const handleClearFile = () => {
+    setSelectedFile(null);
+    setError(null);
+    console.log('🗑️ File cleared');
+  };
+
+  // 🎯 Computed value: Check if we have a file
+  const isFileSelected = selectedFile !== null;
+
+  // 📤 Return everything the component needs
+  return {
+    selectedFile,
+    isFileSelected,
+    handleFileSelect,
+    handleClearFile,
+    error,
+  };
+};
+
+
+
+# ==== src/hooks/useAuth.ts ====
+
+// src/hooks/useAuth.ts
+import { useState, useEffect, useCallback } from 'react';
+import { FaceSwapAPI } from '../services/api';
+
+interface User {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+interface UseAuthReturn {
+  user: User | null;
+  isAuthenticated: boolean;
+  loading: boolean;
+  error: string | null;
+  login: (token: string, userData: User) => void;
+  logout: () => Promise<void>;
+  checkAuthStatus: () => Promise<void>;
+  clearError: () => void;
+}
+
+export const useAuth = (): UseAuthReturn => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const checkAuthStatus = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setUser(null);
+        return;
+      }
+
+      // Verify token is still valid by getting user info
+      const userData = await FaceSwapAPI.refreshUserSession();
+      setUser(userData);
+    } catch (err) {
+      console.log('Auth check failed:', err);
+      // Clear invalid token
+      localStorage.removeItem('authToken');
+      setUser(null);
+      setError(err instanceof Error ? err.message : 'Authentication failed');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const login = useCallback((token: string, userData: User) => {
+    localStorage.setItem('authToken', token);
+    setUser(userData);
+    setError(null);
+    console.log('✅ User logged in:', userData.email);
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await FaceSwapAPI.logout();
+    } catch (err) {
+      console.error('Logout API call failed:', err);
+      // Continue with logout even if API call fails
+    } finally {
+      localStorage.removeItem('authToken');
+      setUser(null);
+      setError(null);
+      console.log('✅ User logged out');
+    }
+  }, []);
+
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
+  // Check auth status on mount
+  useEffect(() => {
+    checkAuthStatus();
+  }, [checkAuthStatus]);
+
+  return {
+    user,
+    isAuthenticated: !!user,
+    loading,
+    error,
+    login,
+    logout,
+    checkAuthStatus,
+    clearError,
+  };
+};
+
+
+
+# ==== src/hooks/useProcessing.ts ====
+
+// src/hooks/useProcessing.ts
+
+import { useState } from 'react';
+import { FaceSwapAPI } from '../services/api';
+import type { FaceSwapResult, ProgressStep, UsageLimitError } from '../types/index';
+
+// 📝 TypeScript: Define the processing state
+interface ProcessingState {
+  step: ProgressStep;
+  progress: number;
+  message: string;
+  matchedFigure?: string;
+}
+
+// 📝 TypeScript: Define what this hook returns
+interface UseProcessingReturn {
+  isProcessing: boolean;
+  processing: ProcessingState;
+  result: FaceSwapResult | null;
+  error: string | null;
+  startProcessing: (file: File, isRandomize?: boolean) => Promise<void>;
+  clearResult: () => void;
+  clearError: () => void;
+}
+
+export const useProcessing = (
+  onUsageLimitReached: (error: UsageLimitError) => void
+): UseProcessingReturn => {
+  // 🎯 State: Track processing status
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [result, setResult] = useState<FaceSwapResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState<ProcessingState>({
+    step: 'uploading',
+    progress: 0,
+    message: 'Preparing your transformation...',
+  });
+
+  // 🎯 Helper: Update processing state
+  const updateProgress = (
+    step: ProgressStep, 
+    progress: number, 
+    message: string, 
+    matchedFigure?: string
+  ) => {
+    setProcessing({ step, progress, message, matchedFigure });
+  };
+
+  // 🎯 Main function: Start the face swap process
+  const startProcessing = async (file: File, isRandomize = false) => {
+    setIsProcessing(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      // Step 1: Uploading
+      updateProgress('uploading', 10, 'Uploading your selfie securely...');
+      
+      // Step 2: Analysis
+      const analysisMessage = isRandomize 
+        ? 'AI is preparing a random transformation...' 
+        : 'AI is analyzing your facial features...';
+      updateProgress('analyzing', 25, analysisMessage);
+      
+      // 🚀 Start the API call
+      const apiPromise = isRandomize
+        ? FaceSwapAPI.randomizeFaceSwap(file, (uploadProgress) => {
+            updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
+          })
+        : FaceSwapAPI.generateFaceSwap(file, (uploadProgress) => {
+            updateProgress('uploading', Math.min(uploadProgress, 20), 'Uploading your selfie securely...');
+          });
+      
+      // Simulate analysis step for better UX
+      setTimeout(() => {
+        const progressMessage = isRandomize 
+          ? 'Spinning the wheel of history...' 
+          : 'Identifying unique facial characteristics...';
+        updateProgress('analyzing', 45, progressMessage);
+      }, 1000);
+      
+      // Simulate matching step
+      setTimeout(() => {
+        const matchingMessage = isRandomize 
+          ? 'Selecting your random historical twin...' 
+          : 'Searching through historical figures...';
+        updateProgress('matching', 65, matchingMessage);
+      }, 2500);
+      
+      // 📡 Wait for API response
+      const apiResult = await apiPromise;
+      
+      // Step 3: Show match found
+      const matchMessage = isRandomize 
+        ? `Random selection: ${apiResult.match_name}!` 
+        : `Perfect match found: ${apiResult.match_name}!`;
+      updateProgress('matching', 80, matchMessage, apiResult.match_name);
+      
+      // Step 4: Face swapping
+      setTimeout(() => {
+        updateProgress('swapping', 95, `Transforming you into ${apiResult.match_name}...`, apiResult.match_name);
+      }, 1000);
+      
+      // Step 5: Complete
+      setTimeout(() => {
+        setResult(apiResult);
+        setIsProcessing(false);
+      }, 2000);
+      
+    } catch (err) {
+      console.error('Face swap error:', err);
+      
+      // 🚨 Check if it's a usage limit error
+      if (err && typeof err === 'object' && 'usage' in err) {
+        const usageLimitError = err as UsageLimitError;
+        console.log('Usage limit reached:', usageLimitError);
+        onUsageLimitReached(usageLimitError);
+        setIsProcessing(false);
+        return; // Don't set error state, let registration gate handle it
+      }
+      
+      // 🚨 Regular error handling
+      const errorMessage = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
+      setError(errorMessage);
+      setIsProcessing(false);
+    }
+  };
+
+  // 🎯 Function: Clear result and go back to upload
+  const clearResult = () => {
+    setResult(null);
+    setError(null);
+    setProcessing({
+      step: 'uploading',
+      progress: 0,
+      message: 'Preparing your transformation...',
+    });
+  };
+
+  // 🎯 Function: Clear error state
+  const clearError = () => {
+    setError(null);
+  };
+
+  // 📤 Return everything the component needs
+  return {
+    isProcessing,
+    processing,
+    result,
+    error,
+    startProcessing,
+    clearResult,
+    clearError,
+  };
+};
+
+
+
+# ==== src/hooks/useRegistrationGate.ts ====
+
+// src/hooks/useRegistrationGate.ts
+
+import { useState, useCallback } from 'react';
+import type { UsageLimitError, UsageData } from '../types/index';
+
+// 📝 TypeScript: Define what this hook returns
+interface UseRegistrationGateReturn {
+  isOpen: boolean;
+  lastFeatureAttempted: 'match' | 'randomize' | undefined;
+  showRegistrationGate: (error: UsageLimitError) => void;
+  hideRegistrationGate: () => void;
+  handleSignUp: () => void;
+  handleLogin: () => void;
+  canUseFeature: (feature: 'match' | 'randomize', usage?: UsageData | null) => boolean;
+}
+
+export const useRegistrationGate = (
+  onRefreshUsage?: () => void
+): UseRegistrationGateReturn => {
+  // 🎯 State: Track registration gate
+  const [isOpen, setIsOpen] = useState(false);
+  const [lastFeatureAttempted, setLastFeatureAttempted] = useState<'match' | 'randomize' | undefined>();
+
+  // 🎯 Function: Show registration gate when usage limit hit
+  const showRegistrationGate = useCallback((error: UsageLimitError) => {
+    console.log('🚪 Showing registration gate for:', error.feature_type);
+    setLastFeatureAttempted(error.feature_type);
+    setIsOpen(true);
+  }, []);
+
+  // 🎯 Function: Hide registration gate
+  const hideRegistrationGate = useCallback(() => {
+    console.log('🚪 Hiding registration gate');
+    setIsOpen(false);
+    setLastFeatureAttempted(undefined);
+  }, []);
+
+  // 🎯 Function: Handle signup click
+  const handleSignUp = useCallback(() => {
+    console.log('📝 Sign up clicked');
+    // TODO: Implement actual signup functionality
+    // For now, just close the gate and refresh usage
+    hideRegistrationGate();
+    if (onRefreshUsage) {
+      onRefreshUsage();
+    }
+    
+    // In a real app, you might:
+    // - Navigate to signup page
+    // - Open signup modal
+    // - Call authentication service
+    alert('Signup functionality coming soon! For now, you can continue using the app.');
+  }, [hideRegistrationGate, onRefreshUsage]);
+
+  // 🎯 Function: Handle login click  
+  const handleLogin = useCallback(() => {
+    console.log('🔑 Login clicked');
+    // TODO: Implement actual login functionality
+    // For now, just close the gate and refresh usage
+    hideRegistrationGate();
+    if (onRefreshUsage) {
+      onRefreshUsage();
+    }
+    
+    // In a real app, you might:
+    // - Navigate to login page
+    // - Open login modal
+    // - Call authentication service
+    alert('Login functionality coming soon! For now, you can continue using the app.');
+  }, [hideRegistrationGate, onRefreshUsage]);
+
+  // 🎯 Function: Check if user can use a specific feature
+  const canUseFeature = useCallback((
+    feature: 'match' | 'randomize', 
+    usage?: UsageData | null
+  ): boolean => {
+    // If no usage data, assume they can use it (first time user)
+    if (!usage) {
+      console.log(`✅ No usage data, allowing ${feature}`);
+      return true;
+    }
+
+    // If user has unlimited access (authenticated), allow everything
+    if (usage.unlimited) {
+      console.log(`✅ Unlimited access, allowing ${feature}`);
+      return true;
+    }
+
+    // Check specific feature limits
+    const canUse = feature === 'match' ? usage.can_match : usage.can_randomize;
+    console.log(`${canUse ? '✅' : '❌'} Can use ${feature}:`, {
+      feature,
+      canUse,
+      usage_summary: {
+        matches: `${usage.matches_used}/${usage.matches_limit}`,
+        randomizes: `${usage.randomizes_used}/${usage.randomizes_limit}`,
+      }
+    });
+
+    return canUse;
+  }, []);
+
+  // 📤 Return everything the component needs
+  return {
+    isOpen,
+    lastFeatureAttempted,
+    showRegistrationGate,
+    hideRegistrationGate,
+    handleSignUp,
+    handleLogin,
+    canUseFeature,
+  };
+};
+
+
+
+# ==== src/services/api.ts ====
+
+import axios from 'axios';
+import type { FaceSwapResult, ApiError, UsageData, UsageLimitError } from '../types/index';
+
+// Read from environment variables
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8002';
+
+console.log('🔧 Environment check:');
+console.log('  - API_BASE_URL:', API_BASE_URL);
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 300000,
+  withCredentials: true, // Include cookies for session management
+});
+
+// 🔥 FIXED: Add request interceptor to include auth token in headers
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      config.headers.Authorization = `Token ${token}`;
+      console.log('🔑 Adding auth token to request:', config.url);
+    }
+    return config;
+  },
+  (error) => {
+    console.error('❌ Request interceptor error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error(`❌ API Error: ${error.response?.status}`, error.response?.data);
+    return Promise.reject(error);
+  }
+);
+
+export class FaceSwapAPI {
+  static async generateFaceSwap(
+    selfieFile: File,
+    onProgress?: (progress: number) => void
+  ): Promise<FaceSwapResult> {
+    const formData = new FormData();
+    formData.append('selfie', selfieFile);
+
+    try {
+      const response = await api.post<FaceSwapResult>('/api/imagegen/generate/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(progress);
+          }
+        },
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  static async randomizeFaceSwap(
+    selfieFile: File,
+    onProgress?: (progress: number) => void
+  ): Promise<FaceSwapResult> {
+    const formData = new FormData();
+    formData.append('selfie', selfieFile);
+
+    try {
+      const response = await api.post<FaceSwapResult>('/api/imagegen/randomize/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(progress);
+          }
+        },
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  static async getUsageStatus(): Promise<UsageData> {
+    try {
+      const response = await api.get<UsageData>('/api/imagegen/usage/');
+      return response.data;
+    } catch (error) {
+      throw new Error('Failed to check usage status');
+    }
+  }
+
+  static async getImageStatus(id: number): Promise<FaceSwapResult> {
+    try {
+      const response = await api.get<FaceSwapResult>(`/api/imagegen/status/${id}/`);
+      return response.data;
+    } catch (error) {
+      throw new Error('Failed to check image status');
+    }
+  }
+
+  static async testConnection(): Promise<boolean> {
+    try {
+      await api.get('/health/');
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // 🔥 NEW: Google Authentication
+  static async googleAuth(credential: string, userInfo: any) {
+    try {
+      console.log('🔑 Sending Google auth request...');
+      const response = await api.post('/api/accounts/auth/google/', { 
+        credential: credential,
+        user_info: userInfo
+      });
+      console.log('✅ Google auth successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Google auth failed:', error);
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Facebook Authentication
+  static async facebookAuth(accessToken: string, userInfo: any) {
+    try {
+      console.log('🔑 Sending Facebook auth request...');
+      const response = await api.post('/api/accounts/auth/facebook/', { 
+        access_token: accessToken,
+        user_info: userInfo
+      });
+      console.log('✅ Facebook auth successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Facebook auth failed:', error);
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Refresh User Session
+  static async refreshUserSession() {
+    try {
+      const response = await api.get('/api/accounts/me/');
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Email/Password Signup (for future use)
+  static async signUp(email: string, password: string, firstName?: string, lastName?: string) {
+    try {
+      const response = await api.post('/api/accounts/signup/', {
+        email,
+        password,
+        first_name: firstName || '',
+        last_name: lastName || ''
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Email/Password Login (for future use)
+  static async login(email: string, password: string) {
+    try {
+      const response = await api.post('/api/accounts/login/', {
+        email,
+        password
+      });
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error);
+    }
+  }
+
+  // 🔥 NEW: Logout
+  static async logout() {
+    try {
+      await api.post('/api/accounts/logout/');
+      // Clear local storage
+      localStorage.removeItem('authToken');
+      return true;
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Clear local storage even if API call fails
+      localStorage.removeItem('authToken');
+      return false;
+    }
+  }
+
+  private static handleApiError(error: unknown): Error {
+    if (axios.isAxiosError(error)) {
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Cannot connect to server. Make sure the backend is running.');
+      }
+      
+      if (error.response?.status === 429) {
+        const errorData = error.response.data as UsageLimitError;
+        const usageLimitError = new Error(errorData.message || 'Usage limit reached') as Error & UsageLimitError;
+        usageLimitError.usage = errorData.usage;
+        usageLimitError.registration_required = errorData.registration_required;
+        usageLimitError.feature_type = errorData.feature_type;
+        throw usageLimitError;
+      }
+      
+      // Handle authentication errors
+      if (error.response?.status === 401) {
+        const errorData = error.response.data as ApiError;
+        throw new Error(errorData.error || 'Authentication failed');
+      }
+      
+      if (error.response?.data) {
+        const apiError = error.response.data as ApiError;
+        throw new Error(apiError.error || `Server error: ${error.response.status}`);
+      }
+    }
+    
+    throw new Error('Network error. Please check your connection and try again.');
+  }
+}
+
+export default api;
+
+
+
+
+# ==== ./tsconfig.node.json ====
+
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.ts"]
+}
+
+
+
+
+# ==== ./tailwind.config.js ====
+
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
+        }
+      },
+      animation: {
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      }
+    },
+  },
+  plugins: [],
+}
+
+
+
+# ==== ./netlify.toml ====
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Fix SPA routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Fix MIME types
+[[headers]]
+  for = "*.js"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
+
+[[headers]]
+  for = "*.mjs"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
+
+[[headers]]
+  for = "*.css"
+  [headers.values]
+    Content-Type = "text/css; charset=utf-8"
+
+# Cache assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+
+
+# ==== ./tsconfig.app.json ====
+
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src"]
+}
+
+
+
+
+# ==== ./package.json ====
+
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "lucide-react": "^0.516.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-dropzone": "^14.3.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.0",
+    "@flydotio/dockerfile": "^0.7.10",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.6.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.25.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "globals": "^16.0.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.30.1",
+    "vite": "^6.3.5"
+  }
+}
+
+
+
+
+# ==== ./fly.toml ====
+
+# fly.toml app configuration file generated for frontend-delicate-pine-6591 on 2025-06-17T18:14:08-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'frontend-delicate-pine-6591'
+primary_region = 'ewr'
+
+[build]
+
+[http_service]
+  internal_port = 80
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+
+
+
+# ==== ./tsconfig.json ====
+
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
+
+
+
+
+# ==== ./eslint.config.js ====
+
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  { ignores: ['dist'] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+    },
+  },
+)
+
+
+
+
+# ==== ./vite.config.ts ====
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    host: true,
+    open: true
+  },
+  css: {
+    postcss: './postcss.config.js'
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: true
+  }
+})
+
+
+
+# ==== ./postcss.config.js ====
+
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+
+
+
+# ==================== Main React Files ====================
+
+
+
+# ==== src/App.tsx ====
+
+import { History } from 'lucide-react';
+import ProcessingStatus from './components/ProcessingStatus';
+import ResultDisplay from './components/ResultDisplay';
+import RegistrationGate from './components/RegistrationGate';
+import UploadSection from './components/UploadSection';
+import ErrorDisplay from './components/ErrorDisplay';
+import UserMenu from './components/UserMenu';
+import { useUsage } from './hooks/useUsage';
+import { useFileUpload } from './hooks/useFileUpload';
+import { useProcessing } from './hooks/useProcessing';
+import { useRegistrationGate } from './hooks/useRegistrationGate';
+import { useAuth } from './hooks/useAuth';
+
+function App() {
+  // 🎯 Custom Hooks handle all the complexity
+  const { usage, loading: usageLoading, checkUsage } = useUsage();
+  const { isAuthenticated, checkAuthStatus } = useAuth();
+  
+  const { 
+    selectedFile, 
+    handleFileSelect, 
+    handleClearFile, 
+    error: fileError 
+  } = useFileUpload();
+  
+  // 🔥 Updated: Enhanced registration gate callback
+  const handleUsageLimitReached = (usageLimitError: any) => {
+    // Only show registration gate if user is not authenticated
+    if (!isAuthenticated) {
+      showRegistrationGate(usageLimitError);
+    }
+  };
+  
+  const {
+    isProcessing,
+    processing,
+    result,
+    error: processingError,
+    startProcessing,
+    clearResult,
+    clearError
+  } = useProcessing(handleUsageLimitReached);
+  
+  const {
+    isOpen: showRegistrationModal,
+    lastFeatureAttempted,
+    showRegistrationGate,
+    hideRegistrationGate,
+    handleSignUp,
+    handleLogin,
+    canUseFeature
+  } = useRegistrationGate(() => {
+    checkUsage();
+    checkAuthStatus();
+  });
+
+  // 🎯 Unified error handling
+  const currentError = fileError || processingError;
+
+  // 🎯 Event Handlers
+  const handleFileSelectWrapper = (file: File) => {
+    handleFileSelect(file);
+    if (currentError) {
+      clearError();
+    }
+  };
+
+  const handleClearFileWrapper = () => {
+    handleClearFile();
+    clearResult();
+    clearError();
+  };
+
+  const handleStartProcessing = async (isRandomize = false) => {
+    if (!selectedFile) return;
+    
+    try {
+      await startProcessing(selectedFile, isRandomize);
+      checkUsage(); // Refresh usage after successful operation
+    } catch (error) {
+      // Error handling is done in the useProcessing hook
+      console.error('Processing failed:', error);
+    }
+  };
+
+  const handleRegularMatch = () => handleStartProcessing(false);
+  const handleRandomize = () => handleStartProcessing(true);
+
+  const handleTryAgain = () => {
+    handleClearFileWrapper();
+  };
+
+  // 🎯 Render main content based on processing state
+  const renderContent = () => {
+    if (isProcessing) {
+      return (
+        <div className="max-w-xl mx-auto">
+          <ProcessingStatus
+            step={processing.step}
+            progress={processing.progress}
+            message={processing.message}
+            matchedFigure={processing.matchedFigure}
+          />
+        </div>
+      );
+    }
+
+    if (result) {
+      return (
+        <div className="max-w-4xl mx-auto">
+          <ResultDisplay
+            result={result}
+            onTryAgain={handleTryAgain}
+          />
+        </div>
+      );
+    }
+
+    if (currentError) {
+      return (
+        <ErrorDisplay
+          error={currentError}
+          onTryAgain={handleTryAgain}
+        />
+      );
+    }
+
+    // Default: Upload screen
+    return (
+      <UploadSection
+        selectedFile={selectedFile}
+        onFileSelect={handleFileSelectWrapper}
+        onClearFile={handleClearFileWrapper}
+        onRegularMatch={handleRegularMatch}
+        onRandomize={handleRandomize}
+        onShowRegistrationGate={showRegistrationGate}
+        canUseMatch={isAuthenticated ? true : canUseFeature('match', usage)}
+        usage={usage}
+        usageLoading={usageLoading}
+      />
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg p-2">
+                <History className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">HistoryFace</h1>
+                <p className="text-sm text-gray-500">AI Historical Transformation</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              {/* Usage Summary - only show for non-authenticated users */}
+              {!isAuthenticated && usage && !usage.unlimited && !usageLoading && (
+                <div className="hidden sm:flex items-center gap-3 text-sm text-gray-600">
+                  <span>Matches: {usage.matches_used}/{usage.matches_limit}</span>
+                  <span>•</span>
+                  <span>Randomizes: {usage.randomizes_used}/{usage.randomizes_limit}</span>
+                </div>
+              )}
+              
+              {/* Authenticated user gets unlimited indicator */}
+              {isAuthenticated && (
+                <div className="hidden sm:flex items-center gap-2 text-sm text-green-600">
+                  <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                  <span>Unlimited Access</span>
+                </div>
+              )}
+              
+              {(result || currentError) && (
+                <button
+                  onClick={handleTryAgain}
+                  className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  ← Start Over
+                </button>
+              )}
+
+              {/* User Menu */}
+              <UserMenu 
+                onShowRegistrationGate={() => showRegistrationGate({
+                  error: 'Authentication required',
+                  message: 'Sign up to unlock unlimited access',
+                  feature_type: 'match',
+                  registration_required: true,
+                  usage: usage || {
+                    matches_used: 0,
+                    matches_limit: 1,
+                    randomizes_used: 0,
+                    randomizes_limit: 1,
+                    can_match: true,
+                    can_randomize: true,
+                    is_limited: false,
+                  }
+                })}
+                onUserStateChange={() => {
+                  checkUsage();
+                  checkAuthStatus();
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {renderContent()}
+      </main>
+
+      {/* Registration Gate Modal */}
+      <RegistrationGate
+        isOpen={showRegistrationModal}
+        onClose={hideRegistrationGate}
+        onSignUp={handleSignUp}
+        onLogin={handleLogin}
+        usage={usage}
+        lastFeatureAttempted={lastFeatureAttempted}
+      />
+
+      {/* Footer */}
+      <footer className="bg-gray-50 border-t border-gray-200 mt-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center">
+            <p className="text-gray-600 text-sm">
+              Powered by AI face recognition and historical figure matching
+            </p>
+            <p className="text-gray-500 text-xs mt-2">
+              Your photos are processed securely and not stored permanently
+            </p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+# ==== src/main.tsx ====
+
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.tsx'
+import ErrorBoundary from './components/ErrorBoundary.tsx'
+import './index.css'
+
+console.log('🚀 main.tsx loading...');
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('Root element not found');
+}
+
+console.log('✅ Root element found, mounting React app...');
+
+createRoot(rootElement).render(
+  <StrictMode>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </StrictMode>
+);
+
+console.log('✅ React app mounted successfully!');
+
+
+
+# ==================== React Components ====================
+
+
+
+# ==== src/components/RandomizeButton.tsx ====
+
+import React from 'react';
+import { Shuffle, Lock } from 'lucide-react';
+import type { UsageData } from '../types/index';
+
+interface RandomizeButtonProps {
+  onRandomize: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  usage?: UsageData | null;
+  hasSelectedFile: boolean;
+}
+
+const RandomizeButton: React.FC<RandomizeButtonProps> = ({
+  onRandomize,
+  disabled = false,
+  loading = false,
+  usage,
+  hasSelectedFile
+}) => {
+  const canRandomize = usage ? (usage.unlimited || usage.can_randomize) : true;
+  const isDisabled = disabled || loading || !hasSelectedFile || !canRandomize;
+  
+  const getButtonText = () => {
+    if (loading) return 'Randomizing...';
+    if (!hasSelectedFile) return 'Upload Photo First';
+    if (!canRandomize && usage) {
+      return `Randomize (${usage.randomizes_used}/${usage.randomizes_limit} used)`;
+    }
+    return '🎲 Surprise Me!';
+  };
+
+  const getButtonSubtext = () => {
+    if (!hasSelectedFile) return 'Select a selfie to get started';
+    if (!canRandomize && usage) return 'Upgrade to randomize more';
+    return 'Get matched with a random historical figure';
+  };
+
+  return (
+    <div className="text-center">
+      <button
+        onClick={onRandomize}
+        disabled={isDisabled}
+        className={`
+          relative px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-200 flex items-center justify-center gap-3 mx-auto
+          ${isDisabled 
+            ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+            : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-lg hover:shadow-xl transform hover:scale-105'
+          }
+        `}
+      >
+        {!canRandomize && usage ? (
+          <Lock size={20} />
+        ) : (
+          <Shuffle size={20} className={loading ? 'animate-spin' : ''} />
+        )}
+        {getButtonText()}
+      </button>
+      
+      <p className={`text-sm mt-2 ${!canRandomize && usage ? 'text-red-600' : 'text-gray-600'}`}>
+        {getButtonSubtext()}
+      </p>
+      
+      {usage && !usage.unlimited && (
+        <div className="mt-3 text-xs text-gray-500">
+          Randomizes remaining: {usage.can_randomize ? usage.randomizes_limit - usage.randomizes_used : 0}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default RandomizeButton;
+
+
+
+# ==== src/components/UserMenu.tsx ====
+
+// src/components/UserMenu.tsx
+import React, { useState, useRef, useEffect } from 'react';
+import { LogOut, Settings, History, ChevronDown } from 'lucide-react';
+import { FaceSwapAPI } from '../services/api';
+
+interface UserData {
+  id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+}
+
+interface UserMenuProps {
+  onShowRegistrationGate: () => void;
+  onUserStateChange?: () => void;
+}
+
+const UserMenu: React.FC<UserMenuProps> = ({ onShowRegistrationGate, onUserStateChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [user, setUser] = useState<UserData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Check authentication status on mount
+  useEffect(() => {
+    checkAuthStatus();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      // Try to get user info to verify token is valid
+      const userData = await FaceSwapAPI.refreshUserSession();
+      setUser(userData);
+    } catch (error) {
+      console.log('User not authenticated:', error);
+      // Clear invalid token
+      localStorage.removeItem('authToken');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignIn = () => {
+    onShowRegistrationGate();
+    setIsOpen(false);
+  };
+
+  const handleLogout = async () => {

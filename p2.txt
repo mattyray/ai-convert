@@ -1,0 +1,1052 @@
+
+
+## imagegen/face_match.py
+```python
+import face_recognition
+import numpy as np
+import json
+from pathlib import Path
+
+EMBEDDINGS_PATH = Path(__file__).resolve().parent.parent / "face_data" / "embeddings.json"
+
+def match_face(uploaded_image_path):
+    """
+    Match an uploaded face image against historical figures
+    Returns best match with confidence score
+    """
+    try:
+        print(f"🔍 Processing uploaded image: {uploaded_image_path}")
+        
+        # Load the uploaded selfie
+        image = face_recognition.load_image_file(uploaded_image_path)
+        face_locations = face_recognition.face_locations(image)
+        
+        if not face_locations:
+            return {"error": "No face detected in uploaded image."}
+        
+        if len(face_locations) > 1:
+            print(f"⚠️  Multiple faces detected, using the largest one.")
+        
+        # Get encoding for the uploaded face
+        uploaded_encoding = face_recognition.face_encodings(image, known_face_locations=face_locations)[0]
+        print(f"✅ Successfully extracted face encoding from uploaded image")
+        
+    except Exception as e:
+        print(f"❌ Error processing uploaded image: {str(e)}")
+        return {"error": f"Failed to process uploaded image: {e}"}
+
+    # Load historical figure embeddings
+    try:
+        if not EMBEDDINGS_PATH.exists():
+            return {"error": f"Embeddings file not found at {EMBEDDINGS_PATH}. Run embed_cloudinary_faces.py first."}
+            
+        with open(EMBEDDINGS_PATH, "r") as f:
+            known_embeddings = json.load(f)
+            
+        if not known_embeddings:
+            return {"error": "No historical embeddings found. Run embed_cloudinary_faces.py first."}
+            
+        print(f"📚 Loaded {len(known_embeddings)} historical figure embeddings")
+        
+    except Exception as e:
+        print(f"❌ Error loading embeddings: {str(e)}")
+        return {"error": f"Failed to load historical embeddings: {e}"}
+
+    # Compare using cosine similarity
+    def cosine_similarity(a, b):
+        """Calculate cosine similarity between two vectors"""
+        return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+    best_match = None
+    best_score = -1
+    all_scores = []
+
+    print("🎯 Comparing against historical figures...")
+    
+    for entry in known_embeddings:
+        try:
+            name = entry["name"]
+            known_vector = np.array(entry["embedding"])
+            
+            # Calculate similarity score
+            score = cosine_similarity(uploaded_encoding, known_vector)
+            all_scores.append((name, score))
+            
+            print(f"  • {name}: {score:.3f}")
+            
+            if score > best_score:
+                best_score = score
+                best_match = name
+                
+        except Exception as e:
+            print(f"⚠️  Error processing {entry.get('name', 'unknown')}: {str(e)}")
+            continue
+
+    # Sort all scores for debugging
+    all_scores.sort(key=lambda x: x[1], reverse=True)
+    print(f"\n🏆 Top 3 matches:")
+    for i, (name, score) in enumerate(all_scores[:3]):
+        print(f"  {i+1}. {name}: {score:.3f}")
+
+    if best_match and best_score > 0.3:  # Minimum confidence threshold
+        print(f"\n✅ Best match: {best_match} (confidence: {best_score:.3f})")
+        return {
+            "match_name": best_match, 
+            "score": best_score,
+            "all_matches": all_scores[:5]  # Return top 5 for debugging
+        }
+    else:
+        print(f"\n❌ No confident match found (best score: {best_score:.3f})")
+        return {
+            "error": f"No confident match found. Best match was {best_match} with score {best_score:.3f}",
+            "all_matches": all_scores[:5]
+        }
+```
+
+## imagegen/__init__.py
+```python
+
+```
+
+## imagegen/apps.py
+```python
+from django.apps import AppConfig
+
+
+class ImagegenConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'imagegen'
+
+```
+
+## imagegen/admin.py
+```python
+from django.contrib import admin
+from .models import GeneratedImage
+
+@admin.register(GeneratedImage)
+class GeneratedImageAdmin(admin.ModelAdmin):
+    list_display = ('match_name', 'user', 'created_at')
+    readonly_fields = ('created_at',)
+
+```
+
+## imagegen/utils.py
+```python
+from PIL import Image
+import io
+from django.core.files.base import ContentFile
+
+def compress_image(image_file, max_size=(800, 800), quality=75):
+    """Compress uploaded images to reduce memory usage"""
+    try:
+        img = Image.open(image_file)
+        
+        # Convert to RGB if necessary (removes alpha channels)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = background
+        
+        # Resize to reasonable dimensions
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        
+        # Compress
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=quality, optimize=True)
+        output.seek(0)
+        
+        return ContentFile(output.getvalue())
+    except Exception as e:
+        print(f"Compression error: {e}")
+        return image_file
+```
+
+## imagegen/urls.py
+```python
+from django.urls import path
+from .views import (
+    GenerateImageView, 
+    ImageStatusView, 
+    UnlockImageView, 
+    ListGeneratedImagesView,
+    RandomizeImageView,
+    UsageStatusView,
+)
+
+app_name = "imagegen"
+
+urlpatterns = [
+    path("generate/", GenerateImageView.as_view(), name="generate-image"),
+    path("randomize/", RandomizeImageView.as_view(), name="randomize-image"),
+    path("usage/", UsageStatusView.as_view(), name="usage-status"),
+    path("status/<int:prediction_id>/", ImageStatusView.as_view(), name="image-status"),
+    path("unlock/", UnlockImageView.as_view(), name="unlock-generation"),
+    path("list/", ListGeneratedImagesView.as_view(), name="list-images"),
+]
+```
+
+## imagegen/middleware.py
+```python
+from django.http import JsonResponse
+from django.urls import resolve
+from .models import UsageSession
+import logging
+
+logger = logging.getLogger(__name__)
+
+class UsageLimitMiddleware:
+    """Track and enforce usage limits for anonymous users"""
+    
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.tracked_endpoints = {
+            'generate-image': 'match',
+            'randomize-image': 'randomize',
+        }
+    
+    def __call__(self, request):
+        # Skip for authenticated users
+        if request.user.is_authenticated:
+            logger.debug("🔐 User authenticated - skipping usage limits")
+            return self.get_response(request)
+            
+        # Only check POST requests
+        if request.method != 'POST':
+            return self.get_response(request)
+            
+        # Check if this is a tracked endpoint
+        try:
+            resolved = resolve(request.path_info)
+            endpoint_name = resolved.url_name
+        except:
+            return self.get_response(request)
+            
+        if endpoint_name not in self.tracked_endpoints:
+            return self.get_response(request)
+            
+        logger.debug(f"🎯 Processing tracked endpoint: {endpoint_name}")
+        
+        # 🔥 CRITICAL FIX: Ensure session exists BEFORE checking usage
+        if not request.session.session_key:
+            request.session.create()
+            logger.debug(f"🔑 Created new session: {request.session.session_key}")
+        else:
+            logger.debug(f"🔑 Using existing session: {request.session.session_key}")
+            
+        # FORCE session save to ensure it persists
+        request.session.save()
+        
+        # Get or create usage session
+        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        logger.debug(f"📊 Usage session: matches={usage_session.matches_used}/{usage_session.MAX_MATCHES}, randomizes={usage_session.randomizes_used}/{usage_session.MAX_RANDOMIZES}")
+        
+        # Check limits BEFORE processing
+        feature_type = self.tracked_endpoints[endpoint_name]
+        
+        if feature_type == 'match' and not usage_session.can_match:
+            logger.debug("🚫 Match limit reached")
+            return self.create_limit_response('match', usage_session)
+        elif feature_type == 'randomize' and not usage_session.can_randomize:
+            logger.debug("🚫 Randomize limit reached")
+            return self.create_limit_response('randomize', usage_session)
+            
+        # Store usage session for view to use
+        request.usage_session = usage_session
+        logger.debug(f"✅ Request approved - feature: {feature_type}")
+        
+        return self.get_response(request)
+    
+    def create_limit_response(self, feature_type, usage_session):
+        """Create response when user hits limit"""
+        logger.info(f"🚫 Limit reached for {feature_type}")
+        return JsonResponse({
+            'error': 'Usage limit reached',
+            'message': f'You have reached your limit for {feature_type}. Please sign up to continue.',
+            'feature_type': feature_type,
+            'usage': {
+                'matches_used': usage_session.matches_used,
+                'matches_limit': usage_session.MAX_MATCHES,
+                'randomizes_used': usage_session.randomizes_used,
+                'randomizes_limit': usage_session.MAX_RANDOMIZES,
+                'can_match': usage_session.can_match,
+                'can_randomize': usage_session.can_randomize,
+                'is_limited': usage_session.is_limited,
+            },
+            'registration_required': True
+        }, status=429)
+```
+
+## imagegen/views/__init__.py
+```python
+from .generation_views import GenerateImageView, RandomizeImageView
+from .management_views import (
+    UsageStatusView, 
+    ImageStatusView, 
+    UnlockImageView, 
+    ListGeneratedImagesView
+)
+
+__all__ = [
+    'GenerateImageView',
+    'RandomizeImageView', 
+    'UsageStatusView',
+    'ImageStatusView',
+    'UnlockImageView',
+    'ListGeneratedImagesView'
+]
+```
+
+## imagegen/views/management_views.py
+```python
+# imagegen/views/management_views.py - Usage tracking and image management
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import permissions
+from ..models import GeneratedImage, UsageSession
+
+
+class UsageStatusView(APIView):
+    """Get current usage status"""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        if request.user.is_authenticated:
+            return Response({"unlimited": True, "user_authenticated": True})
+        
+        if not request.session.session_key:
+            request.session.create()
+            
+        usage_session = UsageSession.get_or_create_for_session(request.session.session_key)
+        
+        return Response({
+            "matches_used": usage_session.matches_used,
+            "matches_limit": usage_session.MAX_MATCHES,
+            "randomizes_used": usage_session.randomizes_used,
+            "randomizes_limit": usage_session.MAX_RANDOMIZES,
+            "can_match": usage_session.can_match,
+            "can_randomize": usage_session.can_randomize,
+            "is_limited": usage_session.is_limited,
+            "user_authenticated": False
+        })
+
+
+class ImageStatusView(APIView):
+    def get(self, request, prediction_id):
+        try:
+            generated_image = GeneratedImage.objects.get(id=prediction_id)
+            return Response({
+                "id": generated_image.id,
+                "status": "completed" if generated_image.output_image else "processing",
+                "match_name": generated_image.match_name,
+                "prompt": generated_image.prompt,
+                "output_image_url": generated_image.output_image.url if generated_image.output_image else None,
+                "created_at": generated_image.created_at
+            })
+        except GeneratedImage.DoesNotExist:
+            return Response({"error": "Generated image not found"}, status=404)
+
+
+class UnlockImageView(APIView):
+    def post(self, request):
+        request.session["image_generation_count"] = 0
+        return Response({"message": "Unlock granted. You can generate again."})
+
+
+class ListGeneratedImagesView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        images = GeneratedImage.objects.filter(user=request.user).order_by('-created_at')
+        results = []
+        for img in images:
+            results.append({
+                "id": img.id,
+                "match_name": img.match_name,
+                "prompt": img.prompt,
+                "output_image_url": img.output_image.url if img.output_image else None,
+                "selfie_url": img.selfie.url,
+                "created_at": img.created_at
+            })
+        return Response({"images": results})
+```
+
+## imagegen/views/generation_views.py
+```python
+# imagegen/views/generation_views.py - Core face generation functionality
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from ..models import GeneratedImage, UsageSession
+from ..face_match import match_face
+from faceswap.huggingface_utils import FaceFusionClient
+import tempfile
+from django.core.files.base import ContentFile
+import os
+from django.core.files.uploadedfile import InMemoryUploadedFile
+import io
+from django.core.cache import cache
+from ..utils import compress_image
+from ..data.historical_figures import HISTORICAL_FIGURES, get_random_figure
+
+
+# 🔥 Memory management settings
+MAX_CONCURRENT_JOBS = 2  # Limit simultaneous face swaps
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GenerateImageView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        # Check server capacity
+        active_jobs = cache.get('active_face_swap_jobs', 0)
+        if active_jobs >= MAX_CONCURRENT_JOBS:
+            return Response({"error": "Server busy. Try again in 30 seconds.", "retry_after": 30}, status=503)
+
+        selfie = request.FILES.get("selfie")
+        if not selfie:
+            return Response({"error": "Selfie is required"}, status=400)
+
+        # Get usage session from middleware
+        usage_session = getattr(request, 'usage_session', None)
+        
+        # Compress image
+        compressed_selfie = compress_image(selfie)
+        selfie_content = compressed_selfie.read()
+        selfie_for_model = InMemoryUploadedFile(
+            file=io.BytesIO(selfie_content),
+            field_name='selfie',
+            name=f"compressed_{selfie.name}",
+            content_type='image/jpeg',
+            size=len(selfie_content),
+            charset=None,
+        )
+
+        # Save to temp file for face matching
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            tmp.write(selfie_content)
+            tmp_path = tmp.name
+
+        temp_image = None
+        try:
+            # Increment job counter
+            cache.set('active_face_swap_jobs', active_jobs + 1, timeout=300)
+            
+            # Face matching
+            match_result = match_face(tmp_path)
+            if "error" in match_result:
+                return Response(match_result, status=status.HTTP_400_BAD_REQUEST)
+
+            match_name = match_result["match_name"]
+            match_score = match_result.get("score", 0)
+            
+            # Get historical image
+            historical_image_url = HISTORICAL_FIGURES.get(match_name)
+            if not historical_image_url:
+                return Response({"error": f"No historical image available for {match_name}"}, status=400)
+
+            # Create database record
+            temp_image = GeneratedImage.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                prompt=f"You as {match_name}",
+                match_name=match_name,
+                selfie=selfie_for_model,
+                output_url="",
+            )
+
+            # Face swap
+            class MockImageField:
+                def __init__(self, url):
+                    self.url = url
+
+            source_mock = MockImageField(temp_image.selfie.url)
+            target_mock = MockImageField(historical_image_url)
+
+            client = FaceFusionClient()
+            result_image_data = client.swap_faces(source_mock, target_mock)
+
+            # Save result
+            temp_image.output_image.save(
+                f"{temp_image.id}_fused_{match_name.replace(' ', '_')}.jpg", 
+                ContentFile(result_image_data)
+            )
+            temp_image.save()
+
+            # Update usage for anonymous users
+            if usage_session and not request.user.is_authenticated:
+                usage_session.use_match()
+
+            return Response({
+                "id": temp_image.id,
+                "match_name": match_name,
+                "match_score": round(match_score, 3),
+                "message": f"Successfully transformed you into {match_name}!",
+                "output_image_url": temp_image.output_image.url,
+                "original_selfie_url": temp_image.selfie.url,
+                "historical_figure_url": historical_image_url,
+                "usage": self.get_usage_data(request, usage_session)
+            })
+
+        except Exception as e:
+            if temp_image:
+                try:
+                    temp_image.delete()
+                except:
+                    pass
+            return Response({"error": f"Face processing failed: {str(e)}"}, status=500)
+        
+        finally:
+            current_jobs = cache.get('active_face_swap_jobs', 1)
+            cache.set('active_face_swap_jobs', max(0, current_jobs - 1), timeout=300)
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+
+    def get_usage_data(self, request, usage_session):
+        if request.user.is_authenticated:
+            return {"unlimited": True}
+        elif usage_session:
+            return {
+                "matches_used": usage_session.matches_used,
+                "matches_limit": usage_session.MAX_MATCHES,
+                "randomizes_used": usage_session.randomizes_used,
+                "randomizes_limit": usage_session.MAX_RANDOMIZES,
+                "can_match": usage_session.can_match,
+                "can_randomize": usage_session.can_randomize,
+                "is_limited": usage_session.is_limited,
+            }
+        return None
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RandomizeImageView(APIView):
+    """Randomize with random historical figure"""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        # Check server capacity
+        active_jobs = cache.get('active_face_swap_jobs', 0)
+        if active_jobs >= MAX_CONCURRENT_JOBS:
+            return Response({"error": "Server busy. Try again in 30 seconds.", "retry_after": 30}, status=503)
+
+        selfie = request.FILES.get("selfie")
+        if not selfie:
+            return Response({"error": "Selfie is required"}, status=400)
+
+        # Get usage session from middleware
+        usage_session = getattr(request, 'usage_session', None)
+        
+        # Pick random figure using the new helper function
+        random_figure, historical_image_url = get_random_figure()
+        
+        # Compress image
+        compressed_selfie = compress_image(selfie)
+        selfie_content = compressed_selfie.read()
+        selfie_for_model = InMemoryUploadedFile(
+            file=io.BytesIO(selfie_content),
+            field_name='selfie',
+            name=f"compressed_{selfie.name}",
+            content_type='image/jpeg',
+            size=len(selfie_content),
+            charset=None,
+        )
+
+        temp_image = None
+        try:
+            # Increment job counter
+            cache.set('active_face_swap_jobs', active_jobs + 1, timeout=300)
+
+            # Create database record
+            temp_image = GeneratedImage.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                prompt=f"You as {random_figure} (randomized)",
+                match_name=random_figure,
+                selfie=selfie_for_model,
+                output_url="",
+            )
+
+            # Face swap
+            class MockImageField:
+                def __init__(self, url):
+                    self.url = url
+
+            source_mock = MockImageField(temp_image.selfie.url)
+            target_mock = MockImageField(historical_image_url)
+
+            client = FaceFusionClient()
+            result_image_data = client.swap_faces(source_mock, target_mock)
+
+            # Save result
+            temp_image.output_image.save(
+                f"{temp_image.id}_randomized_{random_figure.replace(' ', '_')}.jpg", 
+                ContentFile(result_image_data)
+            )
+            temp_image.save()
+
+            # Update usage for anonymous users
+            if usage_session and not request.user.is_authenticated:
+                usage_session.use_randomize()
+
+            return Response({
+                "id": temp_image.id,
+                "match_name": random_figure,
+                "match_score": 1.0,
+                "message": f"You've been randomly transformed into {random_figure}!",
+                "output_image_url": temp_image.output_image.url,
+                "original_selfie_url": temp_image.selfie.url,
+                "historical_figure_url": historical_image_url,
+                "is_randomized": True,
+                "usage": self.get_usage_data(request, usage_session)
+            })
+
+        except Exception as e:
+            if temp_image:
+                try:
+                    temp_image.delete()
+                except:
+                    pass
+            return Response({"error": f"Randomized face processing failed: {str(e)}"}, status=500)
+        
+        finally:
+            current_jobs = cache.get('active_face_swap_jobs', 1)
+            cache.set('active_face_swap_jobs', max(0, current_jobs - 1), timeout=300)
+
+    def get_usage_data(self, request, usage_session):
+        if request.user.is_authenticated:
+            return {"unlimited": True}
+        elif usage_session:
+            return {
+                "matches_used": usage_session.matches_used,
+                "matches_limit": usage_session.MAX_MATCHES,
+                "randomizes_used": usage_session.randomizes_used,
+                "randomizes_limit": usage_session.MAX_RANDOMIZES,
+                "can_match": usage_session.can_match,
+                "can_randomize": usage_session.can_randomize,
+                "is_limited": usage_session.is_limited,
+            }
+        return None
+```
+
+## django_project/celery_urls.py
+```python
+# django_project/celery_urls.py
+# Minimal URL configuration for Celery workers (bypasses admin)
+
+from django.urls import path
+from django.http import JsonResponse
+
+def celery_health_check(request):
+    """Simple health check for Celery workers"""
+    return JsonResponse({
+        "status": "celery_worker_healthy",
+        "service": "celery",
+        "message": "Celery worker URLs loaded successfully"
+    })
+
+# Minimal URL patterns that don't require admin or complex routing
+urlpatterns = [
+    path("health/", celery_health_check, name="celery-health"),
+]
+```
+
+## django_project/asgi.py
+```python
+"""
+ASGI config for django_project project.
+
+It exposes the ASGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
+"""
+
+import os
+
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.prod')
+
+application = get_asgi_application()
+
+```
+
+## django_project/__init__.py
+```python
+# django_project/__init__.py
+from __future__ import absolute_import, unicode_literals
+
+# This will make sure the app is always imported when
+# Django starts so that shared_task will use this app.
+from .celery import app as celery_app
+
+__all__ = ('celery_app',)
+```
+
+## django_project/celery.py
+```python
+from __future__ import absolute_import, unicode_literals
+import os
+from celery import Celery
+
+# Set default Django settings module for the 'celery' program
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.dev')
+
+app = Celery('django_project')
+
+# Using a string here means the worker doesn't have to serialize
+# the configuration object to child processes
+app.config_from_object('django.conf:settings', namespace='CELERY')
+
+# Load task modules from all registered Django apps
+app.autodiscover_tasks()
+
+@app.task(bind=True)
+def debug_task(self):
+    print(f'Request: {self.request!r}')
+
+print("✅ Celery app configured successfully")
+```
+
+## django_project/urls.py
+```python
+from django.contrib import admin
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+from django.http import JsonResponse
+
+def api_root(request):
+    return JsonResponse({"message": "API is running!"})
+
+def health_check(request):
+    return JsonResponse({"status": "healthy"})
+
+urlpatterns = [
+    path("", api_root),
+    path("health/", health_check, name="health-check"),  # Add this line
+    path("admin/", admin.site.urls),
+    path("api/accounts/", include(("accounts.urls", "accounts"), namespace="accounts")),
+    path("api/chat/", include(("chat.urls", "chat"), namespace="chat")),
+    path("api/imagegen/", include("imagegen.urls")),
+    path("api/faceswap/", include(("faceswap.urls", "faceswap"), namespace="faceswap")),
+]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+```
+
+## django_project/wsgi.py
+```python
+"""
+WSGI config for django_project project.
+
+It exposes the WSGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.1/howto/deployment/wsgi/
+"""
+
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django_project.settings.prod')
+
+application = get_wsgi_application()
+
+```
+
+## django_project/settings/__init__.py
+```python
+
+```
+
+## django_project/settings/test.py
+```python
+from .base import *
+
+DEBUG = False
+SECRET_KEY = "test-secret-key"
+
+STRIPE_PUBLISHABLE_KEY = "pk_test_dummy"
+STRIPE_SECRET_KEY = "sk_test_dummy"
+STRIPE_WEBHOOK_SECRET = "whsec_dummy"
+stripe.api_key = STRIPE_SECRET_KEY
+
+
+
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+EMAIL_HOST = "localhost"
+EMAIL_PORT = 1025
+EMAIL_USE_TLS = False
+EMAIL_HOST_USER = ""
+EMAIL_HOST_PASSWORD = ""
+DEFAULT_FROM_EMAIL = "test@example.com"
+
+
+# In-memory test DB
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "test.sqlite3",
+    }
+}
+
+RECAPTCHA_PUBLIC_KEY = "test"
+RECAPTCHA_PRIVATE_KEY = "test"
+
+# 👇 Google SSO override here only for tests
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': ['profile', 'email'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+        'OAUTH_PKCE_ENABLED': True,
+        'APP': {
+            'client_id': 'test-client-id',
+            'secret': 'test-secret',
+            'key': ''
+        }
+    }
+}
+
+SECURE_SSL_REDIRECT = False
+SECURE_HSTS_SECONDS = 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
+```
+
+## django_project/settings/dev.py
+```python
+# backend/django_project/settings/dev.py
+from .base import *
+
+DEBUG = True
+
+# Database for local development
+DATABASES = {
+    "default": env.db_url("DATABASE_URL", default="postgresql://postgres:postgres_password@db:5432/faceswap_db")
+}
+
+# Add localhost to allowed hosts
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[
+    "localhost", "127.0.0.1", "0.0.0.0", "backend"
+])
+
+# CORS settings for local development
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",  # Vite dev server
+    "http://127.0.0.1:5173",
+]
+```
+
+## django_project/settings/prod.py
+```python
+# django_project/settings/prod.py - IMPROVED WITH DATABASE ERROR HANDLING
+from .base import *
+import os
+import sys
+import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
+
+DEBUG = False
+
+# ---------------- SECURITY ----------------
+SECURE_SSL_REDIRECT = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+
+# ---------------- STATIC FILES ----------------
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# ---------------- DATABASE (IMPROVED ERROR HANDLING) ----------------
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if DATABASE_URL:
+    try:
+        print(f"🔍 Raw DATABASE_URL: {DATABASE_URL[:50]}...", file=sys.stderr)
+        
+        parsed = dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+        
+        # Add engine if missing
+        if "ENGINE" not in parsed:
+            parsed["ENGINE"] = "django.db.backends.postgresql"
+        
+        print(f"✅ DEBUG: Parsed DATABASE_URL → {parsed}", file=sys.stderr)
+        
+        # 🔥 FIX: Handle empty database name (common Fly.io issue)
+        if not parsed.get("NAME") or parsed.get("NAME") == "":
+            # Try to extract database name from the app name
+            app_name = os.environ.get("FLY_APP_NAME", "ai-face-swap-app")
+            # Remove the "-app" suffix if present for database name
+            db_name = app_name.replace("-app", "")
+            parsed["NAME"] = db_name
+            print(f"🔧 Fixed empty database name: using '{db_name}'", file=sys.stderr)
+        
+        # Validate all required database fields
+        required_fields = ["ENGINE", "NAME", "USER", "HOST", "PORT"]
+        missing_fields = [field for field in required_fields if not parsed.get(field)]
+        
+        if missing_fields:
+            print(f"❌ Missing database fields: {missing_fields}", file=sys.stderr)
+            raise ImproperlyConfigured(f"Missing database configuration fields: {missing_fields}")
+        
+        DATABASES = {"default": parsed}
+        print(f"✅ Database configured successfully: {parsed['NAME']}@{parsed['HOST']}", file=sys.stderr)
+        
+    except Exception as e:
+        print(f"❌ Database configuration error: {e}", file=sys.stderr)
+        print(f"Raw DATABASE_URL was: {DATABASE_URL}", file=sys.stderr)
+        
+        # 🔥 FALLBACK: Try manual parsing if dj_database_url fails
+        if "postgres://" in DATABASE_URL or "postgresql://" in DATABASE_URL:
+            print("🔧 Attempting manual DATABASE_URL parsing...", file=sys.stderr)
+            try:
+                import re
+                # Parse postgres://user:password@host:port/database
+                match = re.match(r'postgres(?:ql)?://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
+                if match:
+                    user, password, host, port, database = match.groups()
+                    # Remove query parameters if present
+                    database = database.split('?')[0]
+                    
+                    DATABASES = {
+                        "default": {
+                            "ENGINE": "django.db.backends.postgresql",
+                            "NAME": database,
+                            "USER": user,
+                            "PASSWORD": password,
+                            "HOST": host,
+                            "PORT": int(port),
+                            "CONN_MAX_AGE": 600,
+                            "CONN_HEALTH_CHECKS": True,
+                        }
+                    }
+                    print(f"✅ Manual parsing successful: {database}@{host}", file=sys.stderr)
+                else:
+                    raise Exception("Could not parse DATABASE_URL format")
+            except Exception as manual_error:
+                print(f"❌ Manual parsing also failed: {manual_error}", file=sys.stderr)
+                raise ImproperlyConfigured(f"Could not configure database: {e}")
+        else:
+            raise ImproperlyConfigured(f"Invalid DATABASE_URL format: {e}")
+else:
+    print("❌ No DATABASE_URL environment variable found", file=sys.stderr)
+    raise ImproperlyConfigured("DATABASE_URL environment variable is required in production")
+
+# ---------------- HOSTS ----------------
+# Get app name from Fly.io environment
+FLY_APP_NAME = os.environ.get("FLY_APP_NAME", "ai-face-swap-app")
+
+ALLOWED_HOSTS = [
+    f"{FLY_APP_NAME}.fly.dev",
+    "ai-face-swap-app.fly.dev",
+    "localhost",
+    "127.0.0.1",
+]
+
+# Add custom allowed hosts from environment
+custom_hosts = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
+if custom_hosts:
+    ALLOWED_HOSTS.extend([host.strip() for host in custom_hosts.split(",") if host.strip()])
+
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{FLY_APP_NAME}.fly.dev",
+    "https://ai-face-swap-app.fly.dev",
+]
+
+# CORS for frontend
+CORS_ALLOWED_ORIGINS = [
+    f"https://{FLY_APP_NAME}.fly.dev",
+    "https://ai-face-swap-app.fly.dev",
+]
+
+# ---------------- LOGGING (IMPROVED) ----------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+    },
+}
+
+print(f"✅ Production settings loaded for {FLY_APP_NAME}", file=sys.stderr)
+```
+
+## django_project/settings/base.py
+```python
+from environ import Env
+from pathlib import Path
+import stripe
+import os
+from django.core.management.utils import get_random_secret_key
+
+print("💥 settings.py loaded from latest build")
+
+# Cloudinary Configuration
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+
+# Initialize environment variables
+env = Env()
+
+# For build time, provide defaults for all required env vars
+cloudinary_url = env('CLOUDINARY_URL', default='')
+if cloudinary_url:
+    # Parse the cloudinary://api_key:api_secret@cloud_name format
+    import re
+    match = re.match(r'cloudinary://(\d+):([^@]+)@(.+)', cloudinary_url)
+    if match:
+        api_key, api_secret, cloud_name = match.groups()
+        CLOUDINARY_STORAGE = {
+            'CLOUD_NAME': cloud_name,
+            'API_KEY': api_key,
+            'API_SECRET': api_secret,
